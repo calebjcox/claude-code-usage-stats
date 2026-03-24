@@ -165,11 +165,17 @@ def load_records(claude_dir, from_date=None, to_date=None):
                     cache_write = int(usage.get('cache_creation_input_tokens') or 0)
                     cache_read  = int(usage.get('cache_read_input_tokens') or 0)
 
+                    # Use the basename of cwd as the project name — that's the
+                    # folder the user actually launched Claude in.  Fall back to
+                    # the internal slug, then to the decoded directory name.
+                    cwd = obj.get('cwd') or ''
+                    project = os.path.basename(cwd) if cwd else (obj.get('slug') or dir_fallback)
+
                     records.append({
                         'uuid':                  uid,
                         'dt':                    dt,
                         'timestamp':             ts_str,
-                        'slug':                  obj.get('slug') or dir_fallback,
+                        'slug':                  project,
                         'model':                 msg.get('model') or 'unknown',
                         'input_tokens':          input_tok,
                         'output_tokens':         output_tok,
@@ -453,10 +459,10 @@ tbody td{padding:8px 12px;white-space:nowrap}
 <main>
   <div class="cards">
     <div class="card"><div class="cl">Messages</div><div class="cv muted" id="sm">—</div></div>
-    <div class="card"><div class="cl">Input Tokens</div><div class="cv blue" id="si">—</div></div>
-    <div class="card"><div class="cl">Cache Write</div><div class="cv amber" id="sw">—</div></div>
-    <div class="card"><div class="cl">Cache Read</div><div class="cv emerald" id="sr">—</div></div>
-    <div class="card"><div class="cl">Output Tokens</div><div class="cv purple" id="so">—</div></div>
+    <div class="card" title="Tokens in the prompt that were not cached — your actual message text, tool results, and any context Claude had to read fresh."><div class="cl">Input Tokens</div><div class="cv blue" id="si">—</div></div>
+    <div class="card" title="Tokens written into the prompt cache this session. Charged at a higher rate than regular input, but future reads of the same content are much cheaper."><div class="cl">Cache Write</div><div class="cv amber" id="sw">—</div></div>
+    <div class="card" title="Tokens served from the prompt cache — previously cached context that Claude reused instead of re-reading. Much cheaper than regular input tokens."><div class="cl">Cache Read</div><div class="cv emerald" id="sr">—</div></div>
+    <div class="card" title="Tokens in Claude's response — the text, code, and tool calls Claude generated."><div class="cl">Output Tokens</div><div class="cv purple" id="so">—</div></div>
   </div>
 
   <div class="sec">
@@ -485,10 +491,10 @@ tbody td{padding:8px 12px;white-space:nowrap}
           <th class="sort" data-s="timestamp">Time <span class="si">▼</span></th>
           <th>Project</th>
           <th>Model</th>
-          <th>Input</th>
-          <th>Cache Write</th>
-          <th>Cache Read</th>
-          <th>Output</th>
+          <th class="sort" data-s="input">Input <span class="si"></span></th>
+          <th class="sort" data-s="cache_write">Cache Write <span class="si"></span></th>
+          <th class="sort" data-s="cache_read">Cache Read <span class="si"></span></th>
+          <th class="sort" data-s="output">Output <span class="si"></span></th>
           <th class="sort" data-s="total">Total <span class="si"></span></th>
           <th>Preview</th>
         </tr></thead>
@@ -618,10 +624,12 @@ function renderChart() {
 function renderFeed() {
   let feed=[...(D.high_utilization_feed||[])];
   if(proj) feed=feed.filter(m=>m.slug===proj);
+  const tokenKey={input:'input_tokens',cache_write:'cache_creation_tokens',
+                  cache_read:'cache_read_tokens',output:'output_tokens',total:'total_tokens'};
   feed.sort((a,b)=>{
     let d = sortBy==='timestamp'
       ? new Date(b.timestamp)-new Date(a.timestamp)
-      : b.total_tokens-a.total_tokens;
+      : b[tokenKey[sortBy]]-a[tokenKey[sortBy]];
     return sortDir==='desc'?d:-d;
   });
   const tb=document.getElementById('fb');
