@@ -109,9 +109,10 @@ def load_records(claude_dir, from_date=None, to_date=None):
 
     Returns (records list, file_count int).
     """
-    seen_uuids = set()
-    records = []
-    file_count = 0
+    seen_uuids  = set()
+    user_msgs   = {}   # uuid -> {'text': str, 'mode': str}
+    pending     = []   # assistant records before user-message linkage
+    file_count  = 0
 
     for jsonl_path in find_jsonl_files(claude_dir):
         file_count += 1
@@ -136,7 +137,21 @@ def load_records(claude_dir, from_date=None, to_date=None):
                     except json.JSONDecodeError:
                         continue
 
-                    if obj.get('type') != 'assistant':
+                    msg_type = obj.get('type')
+
+                    # Collect user messages so we can look up the prompt and
+                    # permission mode that preceded each assistant response.
+                    if msg_type == 'user':
+                        uid = obj.get('uuid')
+                        if uid and uid not in user_msgs:
+                            umsg = obj.get('message') or {}
+                            user_msgs[uid] = {
+                                'text': get_content_preview(umsg.get('content', [])),
+                                'mode': obj.get('permissionMode', ''),
+                            }
+                        continue
+
+                    if msg_type != 'assistant':
                         continue
                     msg = obj.get('message') or {}
                     usage = msg.get('usage')
@@ -171,7 +186,17 @@ def load_records(claude_dir, from_date=None, to_date=None):
                     cwd = obj.get('cwd') or ''
                     project = os.path.basename(cwd) if cwd else (obj.get('slug') or dir_fallback)
 
-                    records.append({
+                    # Extract unique tool names (in call order) from content.
+                    content = msg.get('content') or []
+                    seen_t, tools = set(), []
+                    for block in content:
+                        if isinstance(block, dict) and block.get('type') == 'tool_use':
+                            name = block.get('name', '')
+                            if name and name not in seen_t:
+                                tools.append(name)
+                                seen_t.add(name)
+
+                    pending.append({
                         'uuid':                  uid,
                         'dt':                    dt,
                         'timestamp':             ts_str,
@@ -182,10 +207,20 @@ def load_records(claude_dir, from_date=None, to_date=None):
                         'cache_creation_tokens': cache_write,
                         'cache_read_tokens':     cache_read,
                         'total_tokens':          input_tok + output_tok + cache_write + cache_read,
-                        'content_preview':       get_content_preview(msg.get('content', [])),
+                        'content_preview':       get_content_preview(content),
+                        'tools':                 ', '.join(tools),
+                        'parent_uuid':           obj.get('parentUuid') or '',
                     })
         except OSError:
             continue
+
+    # Link each assistant record to its parent user message.
+    records = []
+    for rec in pending:
+        parent = user_msgs.get(rec.pop('parent_uuid'), {})
+        rec['user_prompt']     = parent.get('text', '')
+        rec['permission_mode'] = parent.get('mode', '')
+        records.append(rec)
 
     return records, file_count
 
@@ -263,6 +298,7 @@ def compute_data(claude_dir, from_str=None, to_str=None):
             'input_tokens', 'output_tokens',
             'cache_creation_tokens', 'cache_read_tokens',
             'total_tokens', 'content_preview',
+            'tools', 'user_prompt', 'permission_mode',
         )}
         for r in feed_records
     ]
@@ -438,6 +474,9 @@ tbody td{padding:8px 12px;white-space:nowrap}
 .tc{color:var(--text)}
 .ic{color:var(--blue)}.wc{color:var(--amber)}.rc{color:var(--emerald)}.oc{color:var(--purple)}
 .pc{color:var(--muted);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.toolsc{color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+.modec{font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(74,158,255,.15);color:var(--blue);white-space:nowrap}
+.upc{color:var(--text);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body>
@@ -484,21 +523,35 @@ tbody td{padding:8px 12px;white-space:nowrap}
   </div>
 
   <div class="sec">
+    <div class="sh">
+      <span class="st">Tokens by Project</span>
+      <span style="font-size:12px;color:var(--muted)">Total tokens per period — one bar per project</span>
+    </div>
+    <div class="cw">
+      <canvas id="ch2"></canvas>
+      <div id="nodata2">No project data for this view</div>
+    </div>
+  </div>
+
+  <div class="sec">
     <div class="sh"><span class="st">Recent Messages</span></div>
     <div class="fw">
       <table>
         <thead><tr>
           <th class="sort" data-s="timestamp">Time <span class="si">▼</span></th>
           <th>Project</th>
+          <th>Mode</th>
           <th>Model</th>
           <th class="sort" data-s="input">Input <span class="si"></span></th>
           <th class="sort" data-s="cache_write">Cache Write <span class="si"></span></th>
           <th class="sort" data-s="cache_read">Cache Read <span class="si"></span></th>
           <th class="sort" data-s="output">Output <span class="si"></span></th>
           <th class="sort" data-s="total">Total <span class="si"></span></th>
-          <th>Preview</th>
+          <th>Tools</th>
+          <th>User Prompt</th>
+          <th>Response Preview</th>
         </tr></thead>
-        <tbody id="fb"><tr><td colspan="9" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
+        <tbody id="fb"><tr><td colspan="12" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -506,7 +559,9 @@ tbody td{padding:8px 12px;white-space:nowrap}
 
 <script>
 // ---- State ----
-let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null;
+let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null;
+
+const PROJ_COLORS = ['#4a9eff','#f59e0b','#10b981','#a855f7','#ef4444','#06b6d4','#84cc16','#f97316','#ec4899','#6366f1'];
 
 const GK = {
   '5min':'by_5min','15min':'by_15min','hour':'by_hour',
@@ -620,6 +675,67 @@ function renderChart() {
   });
 }
 
+// ---- Render project chart ----
+function renderProjectChart() {
+  const key=GK[gran];
+  const nd=document.getElementById('nodata2');
+  const cv=document.getElementById('ch2');
+  const projects=Object.keys(D.by_project||{});
+
+  if(!projects.length){
+    if(chart2){chart2.destroy();chart2=null;}
+    cv.style.display='none'; nd.style.display='flex'; return;
+  }
+  cv.style.display=''; nd.style.display='none';
+
+  // Collect all periods across all projects, sorted
+  const periodSet=new Set();
+  projects.forEach(p=>{(D.by_project[p][key]||[]).forEach(d=>periodSet.add(d.period));});
+  const labels=[...periodSet].sort();
+
+  const datasets=projects.map((p,i)=>{
+    const byPeriod={};
+    (D.by_project[p][key]||[]).forEach(d=>{
+      byPeriod[d.period]=d.input+d.output+d.cache_creation+d.cache_read;
+    });
+    return {
+      type:'bar', label:p,
+      data:labels.map(l=>byPeriod[l]||0),
+      backgroundColor:PROJ_COLORS[i%PROJ_COLORS.length],
+      stack:'s',
+    };
+  });
+
+  if(chart2){
+    chart2.data.labels=labels;
+    // Rebuild datasets (project list may change between polls)
+    chart2.data.datasets=datasets;
+    chart2.update('none');
+    return;
+  }
+
+  chart2=new Chart(cv.getContext('2d'),{
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{stacked:true,ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
+        y:{stacked:true,ticks:{color:'#8892a4',callback:v=>fmt(v)},grid:{color:'#2d3148'},
+           title:{display:true,text:'Total Tokens',color:'#8892a4'}}
+      },
+      plugins:{
+        legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
+        tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'#2d3148',borderWidth:1,
+          titleColor:'#e2e8f0',bodyColor:'#8892a4',
+          callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}
+        }
+      }
+    }
+  });
+}
+
 // ---- Render feed ----
 function renderFeed() {
   let feed=[...(D.high_utilization_feed||[])];
@@ -634,21 +750,27 @@ function renderFeed() {
   });
   const tb=document.getElementById('fb');
   if(!feed.length){
-    tb.innerHTML='<tr><td colspan="9" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
+    tb.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
     return;
   }
   tb.innerHTML=feed.map(m=>{
     const ts=new Date(m.timestamp);
+    const modeCell=m.permission_mode
+      ? '<span class="modec">'+esc(m.permission_mode)+'</span>'
+      : '—';
     return '<tr class="'+rowCls(m.total_tokens)+'">'
       +'<td title="'+esc(ts.toLocaleString())+'">'+esc(rel(m.timestamp))+'</td>'
       +'<td>'+esc(m.slug||'—')+'</td>'
+      +'<td>'+modeCell+'</td>'
       +'<td class="mc" title="'+esc(m.model)+'">'+esc(m.model||'—')+'</td>'
       +'<td class="ic">'+fmt(m.input_tokens)+'</td>'
       +'<td class="wc">'+fmt(m.cache_creation_tokens)+'</td>'
       +'<td class="rc">'+fmt(m.cache_read_tokens)+'</td>'
       +'<td class="oc">'+fmt(m.output_tokens)+'</td>'
       +'<td class="tc"><strong>'+fmt(m.total_tokens)+'</strong></td>'
-      +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview)+'</td>'
+      +'<td class="toolsc" title="'+esc(m.tools)+'">'+esc(m.tools||'—')+'</td>'
+      +'<td class="upc" title="'+esc(m.user_prompt)+'">'+esc(m.user_prompt||'—')+'</td>'
+      +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview||'—')+'</td>'
       +'</tr>';
   }).join('');
 }
@@ -674,6 +796,7 @@ function renderAll() {
   updateProjectDropdown();
   renderCards();
   renderChart();
+  renderProjectChart();
   renderFeed();
   updateSortUI();
 }
@@ -716,7 +839,7 @@ document.getElementById('tabs').addEventListener('click',e=>{
   gran=t.dataset.g;
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');
-  if(D) renderChart();
+  if(D){renderChart();renderProjectChart();}
 });
 document.querySelector('thead').addEventListener('click',e=>{
   const th=e.target.closest('th.sort');
