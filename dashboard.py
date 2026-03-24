@@ -186,15 +186,32 @@ def load_records(claude_dir, from_date=None, to_date=None):
                     cwd = obj.get('cwd') or ''
                     project = os.path.basename(cwd) if cwd else (obj.get('slug') or dir_fallback)
 
-                    # Extract unique tool names (in call order) from content.
+                    # Extract unique tool names, and count lines touched via
+                    # Edit (old_string → removed, new_string → added) and
+                    # Write (content → added).  These are approximations based
+                    # on the tool call inputs stored in the log.
                     content = msg.get('content') or []
                     seen_t, tools = set(), []
+                    lines_added = lines_removed = 0
                     for block in content:
-                        if isinstance(block, dict) and block.get('type') == 'tool_use':
-                            name = block.get('name', '')
-                            if name and name not in seen_t:
-                                tools.append(name)
-                                seen_t.add(name)
+                        if not isinstance(block, dict) or block.get('type') != 'tool_use':
+                            continue
+                        name = block.get('name', '')
+                        if name and name not in seen_t:
+                            tools.append(name)
+                            seen_t.add(name)
+                        inp = block.get('input') or {}
+                        if name == 'Edit':
+                            old_s = inp.get('old_string') or ''
+                            new_s = inp.get('new_string') or ''
+                            if old_s:
+                                lines_removed += old_s.count('\n') + 1
+                            if new_s:
+                                lines_added += new_s.count('\n') + 1
+                        elif name == 'Write':
+                            c = inp.get('content') or ''
+                            if c:
+                                lines_added += c.count('\n') + 1
 
                     pending.append({
                         'uuid':                  uid,
@@ -209,6 +226,8 @@ def load_records(claude_dir, from_date=None, to_date=None):
                         'total_tokens':          input_tok + output_tok + cache_write + cache_read,
                         'content_preview':       get_content_preview(content),
                         'tools':                 ', '.join(tools),
+                        'lines_added':           lines_added,
+                        'lines_removed':         lines_removed,
                         'parent_uuid':           obj.get('parentUuid') or '',
                     })
         except OSError:
@@ -226,15 +245,18 @@ def load_records(claude_dir, from_date=None, to_date=None):
 
 
 def make_bucket():
-    return {'input': 0, 'output': 0, 'cache_creation': 0, 'cache_read': 0, 'messages': 0}
+    return {'input': 0, 'output': 0, 'cache_creation': 0, 'cache_read': 0, 'messages': 0,
+            'lines_added': 0, 'lines_removed': 0}
 
 
 def add_to_bucket(bucket, rec):
-    bucket['input']         += rec['input_tokens']
-    bucket['output']        += rec['output_tokens']
+    bucket['input']          += rec['input_tokens']
+    bucket['output']         += rec['output_tokens']
     bucket['cache_creation'] += rec['cache_creation_tokens']
-    bucket['cache_read']    += rec['cache_read_tokens']
-    bucket['messages']      += 1
+    bucket['cache_read']     += rec['cache_read_tokens']
+    bucket['messages']       += 1
+    bucket['lines_added']    += rec['lines_added']
+    bucket['lines_removed']  += rec['lines_removed']
 
 
 def buckets_to_series(buckets_dict):
@@ -299,6 +321,7 @@ def compute_data(claude_dir, from_str=None, to_str=None):
             'cache_creation_tokens', 'cache_read_tokens',
             'total_tokens', 'content_preview',
             'tools', 'user_prompt', 'permission_mode',
+            'lines_added', 'lines_removed',
         )}
         for r in feed_records
     ]
@@ -541,6 +564,17 @@ tbody td{padding:8px 12px;white-space:nowrap}
   </div>
 
   <div class="sec">
+    <div class="sh">
+      <span class="st">Lines of Code Over Time</span>
+      <span style="font-size:12px;color:var(--muted)">Approximate — counted from Edit (old/new string) and Write (content) tool inputs</span>
+    </div>
+    <div class="cw">
+      <canvas id="ch3"></canvas>
+      <div id="nodata3">No edit/write activity for this view</div>
+    </div>
+  </div>
+
+  <div class="sec">
     <div class="sh"><span class="st">Recent Messages</span></div>
     <div class="fw">
       <table>
@@ -554,11 +588,13 @@ tbody td{padding:8px 12px;white-space:nowrap}
           <th class="sort" data-s="cache_read">Cache Read <span class="si"></span></th>
           <th class="sort" data-s="output">Output <span class="si"></span></th>
           <th class="sort" data-s="total"><span id="th-total-lbl">Total</span> <span class="si"></span></th>
+          <th class="sort" data-s="lines_added">+Lines <span class="si"></span></th>
+          <th class="sort" data-s="lines_removed">-Lines <span class="si"></span></th>
           <th>Tools</th>
           <th>User Prompt</th>
           <th>Response Preview</th>
         </tr></thead>
-        <tbody id="fb"><tr><td colspan="12" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
+        <tbody id="fb"><tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -566,7 +602,7 @@ tbody td{padding:8px 12px;white-space:nowrap}
 
 <script>
 // ---- State ----
-let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null, weighted = true;
+let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null, chart3 = null, weighted = true;
 
 const PROJ_COLORS = ['#4a9eff','#f59e0b','#10b981','#a855f7','#ef4444','#06b6d4','#84cc16','#f97316','#ec4899','#6366f1'];
 // Weights each token type contributes toward Anthropic usage limits.
@@ -760,12 +796,66 @@ function renderProjectChart() {
   });
 }
 
+// ---- Render LOC chart ----
+function renderLocChart() {
+  const s=series();
+  const nd=document.getElementById('nodata3');
+  const cv=document.getElementById('ch3');
+  const hasData=s.some(d=>d.lines_added||d.lines_removed);
+
+  if(!s.length||!hasData){
+    if(chart3){chart3.destroy();chart3=null;}
+    cv.style.display='none'; nd.style.display='flex'; return;
+  }
+  cv.style.display=''; nd.style.display='none';
+
+  const labels=s.map(d=>d.period);
+  const added  =s.map(d=>d.lines_added||0);
+  const removed=s.map(d=>d.lines_removed||0);
+
+  if(chart3){
+    chart3.data.labels=labels;
+    chart3.data.datasets[0].data=added;
+    chart3.data.datasets[1].data=removed;
+    chart3.update('none');
+    return;
+  }
+
+  chart3=new Chart(cv.getContext('2d'),{
+    data:{
+      labels,
+      datasets:[
+        {type:'bar',label:'Lines Added',  data:added,  backgroundColor:'rgba(16,185,129,.75)',stack:'l'},
+        {type:'bar',label:'Lines Removed',data:removed,backgroundColor:'rgba(239,68,68,.75)',stack:'r'},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
+        y:{ticks:{color:'#8892a4'},grid:{color:'#2d3148'},
+           title:{display:true,text:'Lines',color:'#8892a4'}}
+      },
+      plugins:{
+        legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
+        tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'#2d3148',borderWidth:1,
+          titleColor:'#e2e8f0',bodyColor:'#8892a4',
+          callbacks:{label:c=>' '+c.dataset.label+': '+c.parsed.y.toLocaleString()}
+        }
+      }
+    }
+  });
+}
+
 // ---- Render feed ----
 function renderFeed() {
   let feed=[...(D.high_utilization_feed||[])];
   if(proj) feed=feed.filter(m=>m.slug===proj);
   const tokenKey={input:'input_tokens',cache_write:'cache_creation_tokens',
-                  cache_read:'cache_read_tokens',output:'output_tokens'};
+                  cache_read:'cache_read_tokens',output:'output_tokens',
+                  lines_added:'lines_added',lines_removed:'lines_removed'};
   feed.sort((a,b)=>{
     let d = sortBy==='timestamp'
       ? new Date(b.timestamp)-new Date(a.timestamp)
@@ -777,7 +867,7 @@ function renderFeed() {
   document.getElementById('th-total-lbl').textContent=weighted?'W-Total':'Total';
   const tb=document.getElementById('fb');
   if(!feed.length){
-    tb.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
+    tb.innerHTML='<tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
     return;
   }
   tb.innerHTML=feed.map(m=>{
@@ -795,6 +885,8 @@ function renderFeed() {
       +'<td class="rc">'+fmt(m.cache_read_tokens)+'</td>'
       +'<td class="oc">'+fmt(m.output_tokens)+'</td>'
       +'<td class="tc"><strong>'+fmt(wtotal(m))+'</strong></td>'
+      +'<td style="color:#10b981">'+((m.lines_added||0)||'—')+'</td>'
+      +'<td style="color:#ef4444">'+((m.lines_removed||0)||'—')+'</td>'
       +'<td class="toolsc" title="'+esc(m.tools)+'">'+esc(m.tools||'—')+'</td>'
       +'<td class="upc" title="'+esc(m.user_prompt)+'">'+esc(m.user_prompt||'—')+'</td>'
       +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview||'—')+'</td>'
@@ -824,6 +916,7 @@ function renderAll() {
   renderCards();
   renderChart();
   renderProjectChart();
+  renderLocChart();
   renderFeed();
   updateSortUI();
 }
@@ -872,7 +965,7 @@ document.getElementById('tabs').addEventListener('click',e=>{
   gran=t.dataset.g;
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');
-  if(D){renderChart();renderProjectChart();}
+  if(D){renderChart();renderProjectChart();renderLocChart();}
 });
 document.querySelector('thead').addEventListener('click',e=>{
   const th=e.target.closest('th.sort');
