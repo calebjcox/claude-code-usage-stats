@@ -561,16 +561,33 @@ function renderChart() {
     cv.style.display='none'; nd.style.display='flex'; return;
   }
   cv.style.display=''; nd.style.display='none';
-  if(chart){chart.destroy();chart=null;}
+
+  const labels=s.map(d=>d.period);
+  const rows=[
+    s.map(d=>d.cache_read),
+    s.map(d=>d.cache_creation),
+    s.map(d=>d.input),
+    s.map(d=>d.output),
+    s.map(d=>d.messages),
+  ];
+
+  // Update in place to avoid re-running the draw animation on every poll
+  if(chart){
+    chart.data.labels=labels;
+    chart.data.datasets.forEach((ds,i)=>{ds.data=rows[i];});
+    chart.update('none');
+    return;
+  }
+
   chart=new Chart(cv.getContext('2d'),{
     data:{
-      labels:s.map(d=>d.period),
+      labels,
       datasets:[
-        {type:'bar',label:'Cache Read',   data:s.map(d=>d.cache_read),   backgroundColor:'#10b981',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Cache Write',  data:s.map(d=>d.cache_creation),backgroundColor:'#f59e0b',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Input',        data:s.map(d=>d.input),        backgroundColor:'#4a9eff',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Output',       data:s.map(d=>d.output),       backgroundColor:'#a855f7',stack:'t',yAxisID:'y'},
-        {type:'line',label:'Messages',    data:s.map(d=>d.messages),
+        {type:'bar',label:'Cache Read',   data:rows[0],backgroundColor:'#10b981',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Cache Write',  data:rows[1],backgroundColor:'#f59e0b',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Input',        data:rows[2],backgroundColor:'#4a9eff',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Output',       data:rows[3],backgroundColor:'#a855f7',stack:'t',yAxisID:'y'},
+        {type:'line',label:'Messages',    data:rows[4],
          borderColor:'#94a3b8',backgroundColor:'transparent',
          yAxisID:'y2',pointRadius:3,borderWidth:2,tension:.3,pointBackgroundColor:'#94a3b8'}
       ]
