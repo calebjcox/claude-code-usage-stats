@@ -441,7 +441,7 @@ HTML = r"""<!DOCTYPE html>
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;min-height:100vh}
 
 /* ---- Header ---- */
-header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:100}
 header h1{font-size:17px;font-weight:600;white-space:nowrap}
 .hc{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .hc label{color:var(--muted);font-size:12px}
@@ -456,7 +456,7 @@ button.sec{background:transparent;border:1px solid var(--border);color:var(--mut
 #upd{color:var(--muted);font-size:12px}
 
 /* ---- Main ---- */
-main{padding:18px 20px;max-width:1400px}
+main{padding:18px 20px}
 
 /* ---- Cards ---- */
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
@@ -502,6 +502,9 @@ tbody td{padding:8px 12px;white-space:nowrap}
 .upc{color:var(--text);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 .wt-lbl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none}
 .wt-lbl input{accent-color:var(--blue);cursor:pointer}
+.hdiv{width:1px;height:20px;background:var(--border);align-self:center;flex-shrink:0}
+.projlink{cursor:pointer;text-underline-offset:2px;text-decoration:underline;text-decoration-style:dotted}
+.projlink:hover{color:var(--blue)}
 </style>
 </head>
 <body>
@@ -514,6 +517,18 @@ tbody td{padding:8px 12px;white-space:nowrap}
     <button class="sec" id="cb">Clear</button>
     <select id="ps"><option value="">All Projects</option></select>
   </div>
+  <div class="hdiv"></div>
+  <div class="tabs" id="tabs">
+    <button class="tab" data-g="5min">5 min</button>
+    <button class="tab" data-g="15min">15 min</button>
+    <button class="tab on" data-g="hour">Hourly</button>
+    <button class="tab" data-g="day">Daily</button>
+    <button class="tab" data-g="week">Weekly</button>
+    <button class="tab" data-g="month">Monthly</button>
+  </div>
+  <label class="wt-lbl" title="Multiply each token type by its weight toward Anthropic usage limits: Output ×5, Cache Write ×1.25, Cache Read ×0.1, Input ×1">
+    <input type="checkbox" id="wchk" checked> Usage weighted
+  </label>
   <div class="hr">
     <span id="badge">Loading…</span>
     <span id="upd"></span>
@@ -532,19 +547,6 @@ tbody td{padding:8px 12px;white-space:nowrap}
   <div class="sec">
     <div class="sh">
       <span class="st">Token Usage Over Time</span>
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <label class="wt-lbl" title="Multiply each token type by its weight toward Anthropic usage limits: Output ×5, Cache Write ×1.25, Cache Read ×0.1, Input ×1">
-          <input type="checkbox" id="wchk" checked> Usage weighted
-        </label>
-        <div class="tabs" id="tabs">
-          <button class="tab" data-g="5min">5 min</button>
-          <button class="tab" data-g="15min">15 min</button>
-          <button class="tab on" data-g="hour">Hourly</button>
-          <button class="tab" data-g="day">Daily</button>
-          <button class="tab" data-g="week">Weekly</button>
-          <button class="tab" data-g="month">Monthly</button>
-        </div>
-      </div>
     </div>
     <div class="cw">
       <canvas id="ch"></canvas>
@@ -660,10 +662,21 @@ function series() {
 function renderCards() {
   const s=summ();
   document.getElementById('sm').textContent=fmt(s.total_messages);
-  document.getElementById('si').textContent=fmt(s.total_input_tokens);
-  document.getElementById('sw').textContent=fmt(s.total_cache_creation_tokens);
-  document.getElementById('sr').textContent=fmt(s.total_cache_read_tokens);
-  document.getElementById('so').textContent=fmt(s.total_output_tokens);
+  if(weighted) {
+    const W=WEIGHTS;
+    const wt=s.total_input_tokens*W.input + s.total_output_tokens*W.output +
+             s.total_cache_creation_tokens*W.cache_creation + s.total_cache_read_tokens*W.cache_read;
+    const pct=(v,w)=>wt>0?Math.round(v*w/wt*100)+'%':'—';
+    document.getElementById('si').textContent=pct(s.total_input_tokens,        W.input);
+    document.getElementById('sw').textContent=pct(s.total_cache_creation_tokens,W.cache_creation);
+    document.getElementById('sr').textContent=pct(s.total_cache_read_tokens,   W.cache_read);
+    document.getElementById('so').textContent=pct(s.total_output_tokens,        W.output);
+  } else {
+    document.getElementById('si').textContent=fmt(s.total_input_tokens);
+    document.getElementById('sw').textContent=fmt(s.total_cache_creation_tokens);
+    document.getElementById('sr').textContent=fmt(s.total_cache_read_tokens);
+    document.getElementById('so').textContent=fmt(s.total_output_tokens);
+  }
 }
 
 // ---- Render chart ----
@@ -877,7 +890,7 @@ function renderFeed() {
       : '—';
     return '<tr class="'+rowCls(m.total_tokens)+'">'
       +'<td title="'+esc(ts.toLocaleString())+'">'+esc(rel(m.timestamp))+'</td>'
-      +'<td>'+esc(m.slug||'—')+'</td>'
+      +'<td><span class="projlink" data-p="'+esc(m.slug||'')+'">'+esc(m.slug||'—')+'</span></td>'
       +'<td>'+modeCell+'</td>'
       +'<td class="mc" title="'+esc(m.model)+'">'+esc(m.model||'—')+'</td>'
       +'<td class="ic">'+fmt(m.input_tokens)+'</td>'
@@ -957,7 +970,7 @@ document.getElementById('wchk').addEventListener('change',e=>{
   weighted=e.target.checked;
   if(chart){chart.destroy();chart=null;}
   if(chart2){chart2.destroy();chart2=null;}
-  if(D){renderChart();renderProjectChart();renderFeed();}
+  if(D){renderCards();renderChart();renderProjectChart();renderFeed();}
 });
 document.getElementById('tabs').addEventListener('click',e=>{
   const t=e.target.closest('[data-g]');
@@ -966,6 +979,13 @@ document.getElementById('tabs').addEventListener('click',e=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');
   if(D){renderChart();renderProjectChart();renderLocChart();}
+});
+document.getElementById('fb').addEventListener('click',e=>{
+  const el=e.target.closest('.projlink');
+  if(!el||!el.dataset.p) return;
+  proj=el.dataset.p;
+  document.getElementById('ps').value=proj;
+  if(D) renderAll();
 });
 document.querySelector('thead').addEventListener('click',e=>{
   const th=e.target.closest('th.sort');
@@ -977,6 +997,11 @@ document.querySelector('thead').addEventListener('click',e=>{
 });
 
 // ---- Init ----
+{
+  const d=new Date();
+  d.setDate(d.getDate()-7);
+  document.getElementById('fd').value=d.toISOString().slice(0,10);
+}
 fetchData();
 setInterval(fetchData,5000);
 </script>
