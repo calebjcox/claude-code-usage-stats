@@ -477,6 +477,8 @@ tbody td{padding:8px 12px;white-space:nowrap}
 .toolsc{color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis}
 .modec{font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(74,158,255,.15);color:var(--blue);white-space:nowrap}
 .upc{color:var(--text);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.wt-lbl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none}
+.wt-lbl input{accent-color:var(--blue);cursor:pointer}
 </style>
 </head>
 <body>
@@ -507,13 +509,18 @@ tbody td{padding:8px 12px;white-space:nowrap}
   <div class="sec">
     <div class="sh">
       <span class="st">Token Usage Over Time</span>
-      <div class="tabs" id="tabs">
-        <button class="tab" data-g="5min">5 min</button>
-        <button class="tab" data-g="15min">15 min</button>
-        <button class="tab on" data-g="hour">Hourly</button>
-        <button class="tab" data-g="day">Daily</button>
-        <button class="tab" data-g="week">Weekly</button>
-        <button class="tab" data-g="month">Monthly</button>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <label class="wt-lbl" title="Multiply each token type by its weight toward Anthropic usage limits: Output ×5, Cache Write ×1.25, Cache Read ×0.1, Input ×1">
+          <input type="checkbox" id="wchk" checked> Usage weighted
+        </label>
+        <div class="tabs" id="tabs">
+          <button class="tab" data-g="5min">5 min</button>
+          <button class="tab" data-g="15min">15 min</button>
+          <button class="tab on" data-g="hour">Hourly</button>
+          <button class="tab" data-g="day">Daily</button>
+          <button class="tab" data-g="week">Weekly</button>
+          <button class="tab" data-g="month">Monthly</button>
+        </div>
       </div>
     </div>
     <div class="cw">
@@ -546,7 +553,7 @@ tbody td{padding:8px 12px;white-space:nowrap}
           <th class="sort" data-s="cache_write">Cache Write <span class="si"></span></th>
           <th class="sort" data-s="cache_read">Cache Read <span class="si"></span></th>
           <th class="sort" data-s="output">Output <span class="si"></span></th>
-          <th class="sort" data-s="total">Total <span class="si"></span></th>
+          <th class="sort" data-s="total"><span id="th-total-lbl">Total</span> <span class="si"></span></th>
           <th>Tools</th>
           <th>User Prompt</th>
           <th>Response Preview</th>
@@ -559,9 +566,11 @@ tbody td{padding:8px 12px;white-space:nowrap}
 
 <script>
 // ---- State ----
-let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null;
+let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null, weighted = true;
 
 const PROJ_COLORS = ['#4a9eff','#f59e0b','#10b981','#a855f7','#ef4444','#06b6d4','#84cc16','#f97316','#ec4899','#6366f1'];
+// Weights each token type contributes toward Anthropic usage limits.
+const WEIGHTS = {input: 1.0, output: 5.0, cache_creation: 1.25, cache_read: 0.1};
 
 const GK = {
   '5min':'by_5min','15min':'by_15min','hour':'by_hour',
@@ -591,6 +600,15 @@ function rowCls(t) {
   if(t>100000) return 'ro';
   if(t>10000)  return 'ry';
   return 'rg';
+}
+function wtotal(m) {
+  if(!weighted) return m.total_tokens;
+  return Math.round(
+    m.input_tokens            * WEIGHTS.input +
+    m.output_tokens           * WEIGHTS.output +
+    m.cache_creation_tokens   * WEIGHTS.cache_creation +
+    m.cache_read_tokens       * WEIGHTS.cache_read
+  );
 }
 function summ() {
   if(proj && D.by_project[proj]) return D.by_project[proj].summary;
@@ -623,12 +641,13 @@ function renderChart() {
   }
   cv.style.display=''; nd.style.display='none';
 
+  const W=WEIGHTS, yTitle=weighted?'Usage Weight':'Tokens';
   const labels=s.map(d=>d.period);
   const rows=[
-    s.map(d=>d.cache_read),
-    s.map(d=>d.cache_creation),
-    s.map(d=>d.input),
-    s.map(d=>d.output),
+    s.map(d=>weighted?Math.round(d.cache_read*W.cache_read):d.cache_read),
+    s.map(d=>weighted?Math.round(d.cache_creation*W.cache_creation):d.cache_creation),
+    s.map(d=>weighted?Math.round(d.input*W.input):d.input),
+    s.map(d=>weighted?Math.round(d.output*W.output):d.output),
     s.map(d=>d.messages),
   ];
 
@@ -636,6 +655,7 @@ function renderChart() {
   if(chart){
     chart.data.labels=labels;
     chart.data.datasets.forEach((ds,i)=>{ds.data=rows[i];});
+    chart.options.scales.y.title.text=yTitle;
     chart.update('none');
     return;
   }
@@ -659,7 +679,7 @@ function renderChart() {
       scales:{
         x:{stacked:true,ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
         y:{stacked:true,ticks:{color:'#8892a4',callback:v=>fmt(v)},grid:{color:'#2d3148'},
-           title:{display:true,text:'Tokens',color:'#8892a4'}},
+           title:{display:true,text:yTitle,color:'#8892a4'}},
         y2:{position:'right',ticks:{color:'#8892a4'},grid:{drawOnChartArea:false},
             title:{display:true,text:'Messages',color:'#8892a4'}}
       },
@@ -693,10 +713,13 @@ function renderProjectChart() {
   projects.forEach(p=>{(D.by_project[p][key]||[]).forEach(d=>periodSet.add(d.period));});
   const labels=[...periodSet].sort();
 
+  const W=WEIGHTS, yTitle2=weighted?'Usage Weight':'Total Tokens';
   const datasets=projects.map((p,i)=>{
     const byPeriod={};
     (D.by_project[p][key]||[]).forEach(d=>{
-      byPeriod[d.period]=d.input+d.output+d.cache_creation+d.cache_read;
+      byPeriod[d.period]=weighted
+        ? Math.round(d.input*W.input+d.output*W.output+d.cache_creation*W.cache_creation+d.cache_read*W.cache_read)
+        : d.input+d.output+d.cache_creation+d.cache_read;
     });
     return {
       type:'bar', label:p,
@@ -710,6 +733,7 @@ function renderProjectChart() {
     chart2.data.labels=labels;
     // Rebuild datasets (project list may change between polls)
     chart2.data.datasets=datasets;
+    chart2.options.scales.y.title.text=yTitle2;
     chart2.update('none');
     return;
   }
@@ -722,7 +746,7 @@ function renderProjectChart() {
       scales:{
         x:{stacked:true,ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
         y:{stacked:true,ticks:{color:'#8892a4',callback:v=>fmt(v)},grid:{color:'#2d3148'},
-           title:{display:true,text:'Total Tokens',color:'#8892a4'}}
+           title:{display:true,text:yTitle2,color:'#8892a4'}}
       },
       plugins:{
         legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
@@ -741,13 +765,16 @@ function renderFeed() {
   let feed=[...(D.high_utilization_feed||[])];
   if(proj) feed=feed.filter(m=>m.slug===proj);
   const tokenKey={input:'input_tokens',cache_write:'cache_creation_tokens',
-                  cache_read:'cache_read_tokens',output:'output_tokens',total:'total_tokens'};
+                  cache_read:'cache_read_tokens',output:'output_tokens'};
   feed.sort((a,b)=>{
     let d = sortBy==='timestamp'
       ? new Date(b.timestamp)-new Date(a.timestamp)
-      : b[tokenKey[sortBy]]-a[tokenKey[sortBy]];
+      : sortBy==='total'
+        ? wtotal(b)-wtotal(a)
+        : (b[tokenKey[sortBy]]||0)-(a[tokenKey[sortBy]]||0);
     return sortDir==='desc'?d:-d;
   });
+  document.getElementById('th-total-lbl').textContent=weighted?'W-Total':'Total';
   const tb=document.getElementById('fb');
   if(!feed.length){
     tb.innerHTML='<tr><td colspan="12" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
@@ -767,7 +794,7 @@ function renderFeed() {
       +'<td class="wc">'+fmt(m.cache_creation_tokens)+'</td>'
       +'<td class="rc">'+fmt(m.cache_read_tokens)+'</td>'
       +'<td class="oc">'+fmt(m.output_tokens)+'</td>'
-      +'<td class="tc"><strong>'+fmt(m.total_tokens)+'</strong></td>'
+      +'<td class="tc"><strong>'+fmt(wtotal(m))+'</strong></td>'
       +'<td class="toolsc" title="'+esc(m.tools)+'">'+esc(m.tools||'—')+'</td>'
       +'<td class="upc" title="'+esc(m.user_prompt)+'">'+esc(m.user_prompt||'—')+'</td>'
       +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview||'—')+'</td>'
@@ -832,6 +859,12 @@ document.getElementById('cb').addEventListener('click',()=>{
 document.getElementById('ps').addEventListener('change',e=>{
   proj=e.target.value;
   if(D) renderAll();
+});
+document.getElementById('wchk').addEventListener('change',e=>{
+  weighted=e.target.checked;
+  if(chart){chart.destroy();chart=null;}
+  if(chart2){chart2.destroy();chart2=null;}
+  if(D){renderChart();renderProjectChart();renderFeed();}
 });
 document.getElementById('tabs').addEventListener('click',e=>{
   const t=e.target.closest('[data-g]');
