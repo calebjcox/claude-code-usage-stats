@@ -449,7 +449,7 @@ header h1{font-size:17px;font-weight:600;white-space:nowrap}
 .hc select{cursor:pointer}
 button{background:var(--blue);border:1px solid transparent;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;padding:5px 11px;transition:opacity .15s;vertical-align:middle}
 button:hover{opacity:.82}
-button.sec{background:transparent;border-color:var(--border);color:var(--muted)}
+button.sec{background:transparent;border-color:var(--border);color:var(--muted);margin:0}
 .hr{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 #badge{font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(16,185,129,.15);color:var(--emerald);border:1px solid rgba(16,185,129,.3)}
 #badge.err{background:rgba(239,68,68,.15);color:#ef4444;border-color:rgba(239,68,68,.3)}
