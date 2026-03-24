@@ -447,9 +447,9 @@ header h1{font-size:17px;font-weight:600;white-space:nowrap}
 .hc label{color:var(--muted);font-size:12px}
 .hc input[type=date],.hc select{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:13px}
 .hc select{cursor:pointer}
-button{background:var(--blue);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;padding:5px 11px;transition:opacity .15s}
+button{background:var(--blue);border:1px solid transparent;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;padding:5px 11px;transition:opacity .15s;vertical-align:middle}
 button:hover{opacity:.82}
-button.sec{background:transparent;border:1px solid var(--border);color:var(--muted)}
+button.sec{background:transparent;border-color:var(--border);color:var(--muted)}
 .hr{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 #badge{font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(16,185,129,.15);color:var(--emerald);border:1px solid rgba(16,185,129,.3)}
 #badge.err{background:rgba(239,68,68,.15);color:#ef4444;border-color:rgba(239,68,68,.3)}
@@ -666,7 +666,7 @@ function renderCards() {
     const W=WEIGHTS;
     const wt=s.total_input_tokens*W.input + s.total_output_tokens*W.output +
              s.total_cache_creation_tokens*W.cache_creation + s.total_cache_read_tokens*W.cache_read;
-    const pct=(v,w)=>wt>0?Math.round(v*w/wt*100)+'%':'—';
+    const pct=(v,w)=>wt>0?(v*w/wt*100).toFixed(2)+'%':'—';
     document.getElementById('si').textContent=pct(s.total_input_tokens,        W.input);
     document.getElementById('sw').textContent=pct(s.total_cache_creation_tokens,W.cache_creation);
     document.getElementById('sr').textContent=pct(s.total_cache_read_tokens,   W.cache_read);
