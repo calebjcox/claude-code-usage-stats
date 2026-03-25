@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Claude Code Usage</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:      #0f1117;
+  --surface: #1a1d27;
+  --border:  #2d3148;
+  --text:    #e2e8f0;
+  --muted:   #8892a4;
+  --blue:    #4a9eff;
+  --amber:   #f59e0b;
+  --emerald: #10b981;
+  --purple:  #a855f7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;min-height:100vh}
+
+/* ---- Header ---- */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:100}
+header h1{font-size:17px;font-weight:600;white-space:nowrap}
+.hc{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.hc label{color:var(--muted);font-size:12px}
+.hc input[type=date],.hc select{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:13px}
+.hc select{cursor:pointer}
+button{background:var(--blue);border:1px solid transparent;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;padding:5px 11px;transition:opacity .15s;vertical-align:middle}
+button:hover{opacity:.82}
+button.sec{background:transparent;border-color:var(--border);color:var(--muted);margin:0}
+.hr{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+#badge{font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(16,185,129,.15);color:var(--emerald);border:1px solid rgba(16,185,129,.3)}
+#badge.err{background:rgba(239,68,68,.15);color:#ef4444;border-color:rgba(239,68,68,.3)}
+#upd{color:var(--muted);font-size:12px}
+
+/* ---- Main ---- */
+main{padding:18px 20px}
+
+/* ---- Cards ---- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.cl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px}
+.cv{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.cv.blue{color:var(--blue)}.cv.amber{color:var(--amber)}.cv.emerald{color:var(--emerald)}.cv.purple{color:var(--purple)}.cv.muted{color:var(--muted)}
+
+/* ---- Section ---- */
+.sec{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:18px;overflow:hidden}
+.sh{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.st{font-size:14px;font-weight:600}
+
+/* ---- Tabs ---- */
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:4px 10px}
+.tab.on{background:var(--blue);border-color:var(--blue);color:#fff}
+
+/* ---- Chart ---- */
+.cw{padding:16px;height:320px;position:relative}
+#nodata{display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--muted);font-size:14px;pointer-events:none}
+
+/* ---- Feed table ---- */
+.fw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+thead th.sort{cursor:pointer;user-select:none}
+thead th.sort:hover{color:var(--text)}
+tbody tr{border-bottom:1px solid rgba(45,49,72,.5);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,.03)}
+tbody td{padding:8px 12px;white-space:nowrap}
+.rg td:first-child{border-left:3px solid rgba(16,185,129,.5)}
+.ry td:first-child{border-left:3px solid rgba(245,158,11,.5)}
+.ro td:first-child{border-left:3px solid rgba(249,115,22,.5)}
+.rr td:first-child{border-left:3px solid rgba(239,68,68,.5)}
+.mc{color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+.tc{color:var(--text)}
+.ic{color:var(--blue)}.wc{color:var(--amber)}.rc{color:var(--emerald)}.oc{color:var(--purple)}
+.pc{color:var(--muted);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.toolsc{color:var(--muted);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+.modec{font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(74,158,255,.15);color:var(--blue);white-space:nowrap}
+.upc{color:var(--text);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.wt-lbl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none}
+.wt-lbl input{accent-color:var(--blue);cursor:pointer}
+.hdiv{width:1px;height:20px;background:var(--border);align-self:center;flex-shrink:0}
+.projlink{cursor:pointer;text-underline-offset:2px;text-decoration:underline;text-decoration-style:dotted}
+.projlink:hover{color:var(--blue)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Claude Code Usage</h1>
+  <div class="hc">
+    <label>From</label><input type="date" id="fd">
+    <label>To</label><input type="date" id="td">
+    <button id="ab">Apply</button>
+    <button class="sec" id="cb">Clear</button>
+    <select id="ps"><option value="">All Projects</option></select>
+  </div>
+  <div class="hdiv"></div>
+  <div class="tabs" id="tabs">
+    <button class="tab" data-g="5min">5 min</button>
+    <button class="tab" data-g="15min">15 min</button>
+    <button class="tab on" data-g="hour">Hourly</button>
+    <button class="tab" data-g="day">Daily</button>
+    <button class="tab" data-g="week">Weekly</button>
+    <button class="tab" data-g="month">Monthly</button>
+  </div>
+  <label class="wt-lbl" title="Multiply each token type by its weight toward Anthropic usage limits: Output ×5, Cache Write ×1.25, Cache Read ×0.1, Input ×1">
+    <input type="checkbox" id="wchk" checked> Usage weighted
+  </label>
+  <div class="hr">
+    <span id="badge">Loading…</span>
+    <span id="upd"></span>
+  </div>
+</header>
+
+<main>
+  <div class="cards">
+    <div class="card"><div class="cl">Messages</div><div class="cv muted" id="sm">—</div></div>
+    <div class="card" title="Tokens in the prompt that were not cached — your actual message text, tool results, and any context Claude had to read fresh."><div class="cl">Input Tokens</div><div class="cv blue" id="si">—</div></div>
+    <div class="card" title="Tokens written into the prompt cache this session. Charged at a higher rate than regular input, but future reads of the same content are much cheaper."><div class="cl">Cache Write</div><div class="cv amber" id="sw">—</div></div>
+    <div class="card" title="Tokens served from the prompt cache — previously cached context that Claude reused instead of re-reading. Much cheaper than regular input tokens."><div class="cl">Cache Read</div><div class="cv emerald" id="sr">—</div></div>
+    <div class="card" title="Tokens in Claude's response — the text, code, and tool calls Claude generated."><div class="cl">Output Tokens</div><div class="cv purple" id="so">—</div></div>
+  </div>
+
+  <div class="sec">
+    <div class="sh">
+      <span class="st">Token Usage Over Time</span>
+    </div>
+    <div class="cw">
+      <canvas id="ch"></canvas>
+      <div id="nodata">No data for this view</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sh">
+      <span class="st">Tokens by Project</span>
+      <span style="font-size:12px;color:var(--muted)">Total tokens per period — one bar per project</span>
+    </div>
+    <div class="cw">
+      <canvas id="ch2"></canvas>
+      <div id="nodata2">No project data for this view</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sh">
+      <span class="st">Lines of Code Over Time</span>
+      <span style="font-size:12px;color:var(--muted)">Approximate — counted from Edit (old/new string) and Write (content) tool inputs</span>
+    </div>
+    <div class="cw">
+      <canvas id="ch3"></canvas>
+      <div id="nodata3">No edit/write activity for this view</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sh"><span class="st">Recent Messages</span></div>
+    <div class="fw">
+      <table>
+        <thead><tr>
+          <th class="sort" data-s="timestamp">Time <span class="si">▼</span></th>
+          <th>Project</th>
+          <th>Mode</th>
+          <th>Model</th>
+          <th class="sort" data-s="input">Input <span class="si"></span></th>
+          <th class="sort" data-s="cache_write">Cache Write <span class="si"></span></th>
+          <th class="sort" data-s="cache_read">Cache Read <span class="si"></span></th>
+          <th class="sort" data-s="output">Output <span class="si"></span></th>
+          <th class="sort" data-s="total"><span id="th-total-lbl">Total</span> <span class="si"></span></th>
+          <th class="sort" data-s="lines_added">+Lines <span class="si"></span></th>
+          <th class="sort" data-s="lines_removed">-Lines <span class="si"></span></th>
+          <th>Tools</th>
+          <th>User Prompt</th>
+          <th>Response Preview</th>
+        </tr></thead>
+        <tbody id="fb"><tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---- State ----
+let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null, chart3 = null, weighted = true;
+
+const PROJ_COLORS = ['#4a9eff','#f59e0b','#10b981','#a855f7','#ef4444','#06b6d4','#84cc16','#f97316','#ec4899','#6366f1'];
+// Weights each token type contributes toward Anthropic usage limits.
+const WEIGHTS = {input: 1.0, output: 5.0, cache_creation: 1.25, cache_read: 0.1};
+
+const GK = {
+  '5min':'by_5min','15min':'by_15min','hour':'by_hour',
+  'day':'by_day','week':'by_week','month':'by_month'
+};
+
+// ---- Utils ----
+function fmt(n) {
+  if (n==null) return '0';
+  if (n>=1e9) return (n/1e9).toFixed(1)+'B';
+  if (n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if (n>=1e3) return (n/1e3).toFixed(1)+'K';
+  return ''+n;
+}
+function rel(iso) {
+  const s=(Date.now()-new Date(iso))/1000;
+  if(s<60) return Math.floor(s)+'s ago';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  if(s<86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+function esc(s) {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function rowCls(t) {
+  if(t>500000) return 'rr';
+  if(t>100000) return 'ro';
+  if(t>10000)  return 'ry';
+  return 'rg';
+}
+function wtotal(m) {
+  if(!weighted) return m.total_tokens;
+  return Math.round(
+    m.input_tokens            * WEIGHTS.input +
+    m.output_tokens           * WEIGHTS.output +
+    m.cache_creation_tokens   * WEIGHTS.cache_creation +
+    m.cache_read_tokens       * WEIGHTS.cache_read
+  );
+}
+function summ() {
+  if(proj && D.by_project[proj]) return D.by_project[proj].summary;
+  return D.summary;
+}
+function series() {
+  const k=GK[gran];
+  if(proj && D.by_project[proj]) return D.by_project[proj][k]||[];
+  return D[k]||[];
+}
+
+// ---- Render cards ----
+function renderCards() {
+  const s=summ();
+  document.getElementById('sm').textContent=fmt(s.total_messages);
+  if(weighted) {
+    const W=WEIGHTS;
+    const wt=s.total_input_tokens*W.input + s.total_output_tokens*W.output +
+             s.total_cache_creation_tokens*W.cache_creation + s.total_cache_read_tokens*W.cache_read;
+    const pct=(v,w)=>wt>0?(v*w/wt*100).toFixed(2)+'%':'—';
+    document.getElementById('si').textContent=pct(s.total_input_tokens,        W.input);
+    document.getElementById('sw').textContent=pct(s.total_cache_creation_tokens,W.cache_creation);
+    document.getElementById('sr').textContent=pct(s.total_cache_read_tokens,   W.cache_read);
+    document.getElementById('so').textContent=pct(s.total_output_tokens,        W.output);
+  } else {
+    document.getElementById('si').textContent=fmt(s.total_input_tokens);
+    document.getElementById('sw').textContent=fmt(s.total_cache_creation_tokens);
+    document.getElementById('sr').textContent=fmt(s.total_cache_read_tokens);
+    document.getElementById('so').textContent=fmt(s.total_output_tokens);
+  }
+}
+
+// ---- Render chart ----
+function renderChart() {
+  const s=series();
+  const nd=document.getElementById('nodata');
+  const cv=document.getElementById('ch');
+  if(!s.length){
+    if(chart){chart.destroy();chart=null;}
+    cv.style.display='none'; nd.style.display='flex'; return;
+  }
+  cv.style.display=''; nd.style.display='none';
+
+  const W=WEIGHTS, yTitle=weighted?'Usage Weight':'Tokens';
+  const labels=s.map(d=>d.period);
+  const rows=[
+    s.map(d=>weighted?Math.round(d.cache_read*W.cache_read):d.cache_read),
+    s.map(d=>weighted?Math.round(d.cache_creation*W.cache_creation):d.cache_creation),
+    s.map(d=>weighted?Math.round(d.input*W.input):d.input),
+    s.map(d=>weighted?Math.round(d.output*W.output):d.output),
+    s.map(d=>d.messages),
+  ];
+
+  // Update in place to avoid re-running the draw animation on every poll
+  if(chart){
+    chart.data.labels=labels;
+    chart.data.datasets.forEach((ds,i)=>{ds.data=rows[i];});
+    chart.options.scales.y.title.text=yTitle;
+    chart.update('none');
+    return;
+  }
+
+  chart=new Chart(cv.getContext('2d'),{
+    data:{
+      labels,
+      datasets:[
+        {type:'bar',label:'Cache Read',   data:rows[0],backgroundColor:'#10b981',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Cache Write',  data:rows[1],backgroundColor:'#f59e0b',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Input',        data:rows[2],backgroundColor:'#4a9eff',stack:'t',yAxisID:'y'},
+        {type:'bar',label:'Output',       data:rows[3],backgroundColor:'#a855f7',stack:'t',yAxisID:'y'},
+        {type:'line',label:'Messages',    data:rows[4],
+         borderColor:'#94a3b8',backgroundColor:'transparent',
+         yAxisID:'y2',pointRadius:3,borderWidth:2,tension:.3,pointBackgroundColor:'#94a3b8'}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{stacked:true,ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
+        y:{stacked:true,ticks:{color:'#8892a4',callback:v=>fmt(v)},grid:{color:'#2d3148'},
+           title:{display:true,text:yTitle,color:'#8892a4'}},
+        y2:{position:'right',ticks:{color:'#8892a4'},grid:{drawOnChartArea:false},
+            title:{display:true,text:'Messages',color:'#8892a4'}}
+      },
+      plugins:{
+        legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
+        tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'#2d3148',borderWidth:1,
+          titleColor:'#e2e8f0',bodyColor:'#8892a4',
+          callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}
+        }
+      }
+    }
+  });
+}
+
+// ---- Render project chart ----
+function renderProjectChart() {
+  const key=GK[gran];
+  const nd=document.getElementById('nodata2');
+  const cv=document.getElementById('ch2');
+  const projects=Object.keys(D.by_project||{});
+
+  if(!projects.length){
+    if(chart2){chart2.destroy();chart2=null;}
+    cv.style.display='none'; nd.style.display='flex'; return;
+  }
+  cv.style.display=''; nd.style.display='none';
+
+  // Collect all periods across all projects, sorted
+  const periodSet=new Set();
+  projects.forEach(p=>{(D.by_project[p][key]||[]).forEach(d=>periodSet.add(d.period));});
+  const labels=[...periodSet].sort();
+
+  const W=WEIGHTS, yTitle2=weighted?'Usage Weight':'Total Tokens';
+  const datasets=projects.map((p,i)=>{
+    const byPeriod={};
+    (D.by_project[p][key]||[]).forEach(d=>{
+      byPeriod[d.period]=weighted
+        ? Math.round(d.input*W.input+d.output*W.output+d.cache_creation*W.cache_creation+d.cache_read*W.cache_read)
+        : d.input+d.output+d.cache_creation+d.cache_read;
+    });
+    return {
+      type:'bar', label:p,
+      data:labels.map(l=>byPeriod[l]||0),
+      backgroundColor:PROJ_COLORS[i%PROJ_COLORS.length],
+      stack:'s',
+    };
+  });
+
+  if(chart2){
+    chart2.data.labels=labels;
+    // Rebuild datasets (project list may change between polls)
+    chart2.data.datasets=datasets;
+    chart2.options.scales.y.title.text=yTitle2;
+    chart2.update('none');
+    return;
+  }
+
+  chart2=new Chart(cv.getContext('2d'),{
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{stacked:true,ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
+        y:{stacked:true,ticks:{color:'#8892a4',callback:v=>fmt(v)},grid:{color:'#2d3148'},
+           title:{display:true,text:yTitle2,color:'#8892a4'}}
+      },
+      plugins:{
+        legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
+        tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'#2d3148',borderWidth:1,
+          titleColor:'#e2e8f0',bodyColor:'#8892a4',
+          callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}
+        }
+      }
+    }
+  });
+}
+
+// ---- Render LOC chart ----
+function renderLocChart() {
+  const s=series();
+  const nd=document.getElementById('nodata3');
+  const cv=document.getElementById('ch3');
+  const hasData=s.some(d=>d.lines_added||d.lines_removed);
+
+  if(!s.length||!hasData){
+    if(chart3){chart3.destroy();chart3=null;}
+    cv.style.display='none'; nd.style.display='flex'; return;
+  }
+  cv.style.display=''; nd.style.display='none';
+
+  const labels=s.map(d=>d.period);
+  const added  =s.map(d=>d.lines_added||0);
+  const removed=s.map(d=>d.lines_removed||0);
+
+  if(chart3){
+    chart3.data.labels=labels;
+    chart3.data.datasets[0].data=added;
+    chart3.data.datasets[1].data=removed;
+    chart3.update('none');
+    return;
+  }
+
+  chart3=new Chart(cv.getContext('2d'),{
+    data:{
+      labels,
+      datasets:[
+        {type:'bar',label:'Lines Added',  data:added,  backgroundColor:'rgba(16,185,129,.75)',stack:'l'},
+        {type:'bar',label:'Lines Removed',data:removed,backgroundColor:'rgba(239,68,68,.75)',stack:'r'},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{ticks:{color:'#8892a4',maxRotation:45},grid:{color:'#2d3148'}},
+        y:{ticks:{color:'#8892a4'},grid:{color:'#2d3148'},
+           title:{display:true,text:'Lines',color:'#8892a4'}}
+      },
+      plugins:{
+        legend:{labels:{color:'#e2e8f0',boxWidth:12,padding:14}},
+        tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'#2d3148',borderWidth:1,
+          titleColor:'#e2e8f0',bodyColor:'#8892a4',
+          callbacks:{label:c=>' '+c.dataset.label+': '+c.parsed.y.toLocaleString()}
+        }
+      }
+    }
+  });
+}
+
+// ---- Render feed ----
+function renderFeed() {
+  let feed=[...(D.high_utilization_feed||[])];
+  if(proj) feed=feed.filter(m=>m.slug===proj);
+  const tokenKey={input:'input_tokens',cache_write:'cache_creation_tokens',
+                  cache_read:'cache_read_tokens',output:'output_tokens',
+                  lines_added:'lines_added',lines_removed:'lines_removed'};
+  feed.sort((a,b)=>{
+    let d = sortBy==='timestamp'
+      ? new Date(b.timestamp)-new Date(a.timestamp)
+      : sortBy==='total'
+        ? wtotal(b)-wtotal(a)
+        : (b[tokenKey[sortBy]]||0)-(a[tokenKey[sortBy]]||0);
+    return sortDir==='desc'?d:-d;
+  });
+  document.getElementById('th-total-lbl').textContent=weighted?'W-Total':'Total';
+  const tb=document.getElementById('fb');
+  if(!feed.length){
+    tb.innerHTML='<tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
+    return;
+  }
+  tb.innerHTML=feed.map(m=>{
+    const ts=new Date(m.timestamp);
+    const modeCell=m.permission_mode
+      ? '<span class="modec">'+esc(m.permission_mode)+'</span>'
+      : '—';
+    return '<tr class="'+rowCls(m.total_tokens)+'">'
+      +'<td title="'+esc(ts.toLocaleString())+'">'+esc(rel(m.timestamp))+'</td>'
+      +'<td><span class="projlink" data-p="'+esc(m.slug||'')+'">'+esc(m.slug||'—')+'</span></td>'
+      +'<td>'+modeCell+'</td>'
+      +'<td class="mc" title="'+esc(m.model)+'">'+esc(m.model||'—')+'</td>'
+      +'<td class="ic">'+fmt(m.input_tokens)+'</td>'
+      +'<td class="wc">'+fmt(m.cache_creation_tokens)+'</td>'
+      +'<td class="rc">'+fmt(m.cache_read_tokens)+'</td>'
+      +'<td class="oc">'+fmt(m.output_tokens)+'</td>'
+      +'<td class="tc"><strong>'+fmt(wtotal(m))+'</strong></td>'
+      +'<td style="color:#10b981">'+((m.lines_added||0)||'—')+'</td>'
+      +'<td style="color:#ef4444">'+((m.lines_removed||0)||'—')+'</td>'
+      +'<td class="toolsc" title="'+esc(m.tools)+'">'+esc(m.tools||'—')+'</td>'
+      +'<td class="upc" title="'+esc(m.user_prompt)+'">'+esc(m.user_prompt||'—')+'</td>'
+      +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview||'—')+'</td>'
+      +'</tr>';
+  }).join('');
+}
+
+function updateSortUI() {
+  document.querySelectorAll('thead th.sort').forEach(th=>{
+    th.querySelector('.si').textContent=th.dataset.s===sortBy?(sortDir==='desc'?' ▼':' ▲'):'';
+  });
+}
+
+function updateProjectDropdown() {
+  const sel=document.getElementById('ps');
+  const prev=sel.value;
+  while(sel.options.length>1) sel.remove(1);
+  (D.summary.projects||[]).forEach(p=>{
+    const o=new Option(p,p);
+    if(p===prev) o.selected=true;
+    sel.add(o);
+  });
+}
+
+function renderAll() {
+  updateProjectDropdown();
+  renderCards();
+  renderChart();
+  renderProjectChart();
+  renderLocChart();
+  renderFeed();
+  updateSortUI();
+}
+
+// ---- Fetch ----
+async function fetchData() {
+  const p=new URLSearchParams();
+  const fv=document.getElementById('fd').value;
+  const tv=document.getElementById('td').value;
+  if(fv) p.set('from',fv);
+  if(tv) p.set('to',tv);
+  try {
+    const r=await fetch('/api/data?'+p);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    D=await r.json();
+    const b=document.getElementById('badge');
+    b.textContent='● Live'; b.className='';
+    document.getElementById('upd').textContent='Updated '+new Date(D.generated_at).toLocaleTimeString();
+    renderAll();
+  } catch(e) {
+    const b=document.getElementById('badge');
+    b.textContent='● Disconnected'; b.className='err';
+  }
+}
+
+// ---- Events ----
+document.getElementById('ab').addEventListener('click',fetchData);
+document.getElementById('cb').addEventListener('click',()=>{
+  document.getElementById('fd').value='';
+  document.getElementById('td').value='';
+  fetchData();
+});
+document.getElementById('ps').addEventListener('change',e=>{
+  proj=e.target.value;
+  if(D) renderAll();
+});
+document.getElementById('wchk').addEventListener('change',e=>{
+  weighted=e.target.checked;
+  if(chart){chart.destroy();chart=null;}
+  if(chart2){chart2.destroy();chart2=null;}
+  if(D){renderCards();renderChart();renderProjectChart();renderFeed();}
+});
+document.getElementById('tabs').addEventListener('click',e=>{
+  const t=e.target.closest('[data-g]');
+  if(!t) return;
+  gran=t.dataset.g;
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');
+  if(D){renderChart();renderProjectChart();renderLocChart();}
+});
+document.getElementById('fb').addEventListener('click',e=>{
+  const el=e.target.closest('.projlink');
+  if(!el||!el.dataset.p) return;
+  proj=el.dataset.p;
+  document.getElementById('ps').value=proj;
+  if(D) renderAll();
+});
+document.querySelector('thead').addEventListener('click',e=>{
+  const th=e.target.closest('th.sort');
+  if(!th) return;
+  if(sortBy===th.dataset.s) sortDir=sortDir==='desc'?'asc':'desc';
+  else{sortBy=th.dataset.s;sortDir='desc';}
+  updateSortUI();
+  if(D) renderFeed();
+});
+
+// ---- Init ----
+{
+  const d=new Date();
+  d.setDate(d.getDate()-7);
+  document.getElementById('fd').value=d.toISOString().slice(0,10);
+}
+fetchData();
+setInterval(fetchData,5000);
+</script>
+</body>
+</html>
