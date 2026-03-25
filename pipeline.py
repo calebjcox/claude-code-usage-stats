@@ -102,10 +102,12 @@ def load_records(claude_dir, from_date=None, to_date=None):
 
     Returns (records list, file_count int).
     """
-    seen_uuids  = set()
-    user_msgs   = {}   # uuid -> {'text': str, 'mode': str}
-    pending     = []   # assistant records before user-message linkage
-    file_count  = 0
+    seen_uuids        = set()
+    user_msgs         = {}   # uuid -> {'text': str, 'mode': str}
+    msg_parent        = {}   # uuid -> parentUuid for ALL message types (for chain tracing)
+    user_prompt_uuids = set()  # UUIDs of user messages that have actual text content
+    pending           = []   # assistant records before user-message linkage
+    file_count        = 0
 
     for jsonl_path in find_jsonl_files(claude_dir):
         file_count += 1
@@ -132,16 +134,26 @@ def load_records(claude_dir, from_date=None, to_date=None):
 
                     msg_type = obj.get('type')
 
+                    # Track parent chain for ALL message types so we can trace
+                    # multi-step assistant responses back to the root user prompt.
+                    m_uid   = obj.get('uuid')
+                    m_puuid = obj.get('parentUuid') or ''
+                    if m_uid:
+                        msg_parent[m_uid] = m_puuid
+
                     # Collect user messages so we can look up the prompt and
                     # permission mode that preceded each assistant response.
                     if msg_type == 'user':
                         uid = obj.get('uuid')
                         if uid and uid not in user_msgs:
                             umsg = obj.get('message') or {}
+                            text = get_content_preview(umsg.get('content', []))
                             user_msgs[uid] = {
-                                'text': get_content_preview(umsg.get('content', [])),
+                                'text': text,
                                 'mode': obj.get('permissionMode', ''),
                             }
+                            if text:
+                                user_prompt_uuids.add(uid)
                         continue
 
                     if msg_type != 'assistant':
@@ -226,12 +238,25 @@ def load_records(claude_dir, from_date=None, to_date=None):
         except OSError:
             continue
 
-    # Link each assistant record to its parent user message.
+    # Trace a UUID back to the root user-prompt UUID by following parentUuid
+    # links.  This handles multi-step chains where each assistant turn's parent
+    # is a tool-result user message rather than the original text prompt.
+    def find_root_prompt(start):
+        visited, current = set(), start
+        while current and current not in visited:
+            if current in user_prompt_uuids:
+                return current
+            visited.add(current)
+            current = msg_parent.get(current, '')
+        return start  # fallback: no text prompt found in chain
+
+    # Link each assistant record to its parent user message and root prompt.
     records = []
     for rec in pending:
-        parent = user_msgs.get(rec.pop('parent_uuid'), {})
-        rec['user_prompt']     = parent.get('text', '')
-        rec['permission_mode'] = parent.get('mode', '')
+        parent = user_msgs.get(rec['parent_uuid'], {})
+        rec['user_prompt']      = parent.get('text', '')
+        rec['permission_mode']  = parent.get('mode', '')
+        rec['root_prompt_uuid'] = find_root_prompt(rec['parent_uuid'] or rec['uuid'])
         records.append(rec)
 
     return records, file_count
@@ -305,19 +330,50 @@ def compute_data(claude_dir, from_str=None, to_str=None):
             add_to_bucket(overall[g][period], rec)
             add_to_bucket(by_project[slug][g][period], rec)
 
-    # Feed: most recent FEED_SIZE messages (client sorts further)
-    feed_records = sorted(records, key=lambda r: r['timestamp'], reverse=True)[:FEED_SIZE]
-    feed_out = [
-        {k: r[k] for k in (
-            'uuid', 'timestamp', 'slug', 'model',
-            'input_tokens', 'output_tokens',
-            'cache_creation_tokens', 'cache_read_tokens',
-            'total_tokens', 'content_preview',
-            'tools', 'user_prompt', 'permission_mode',
-            'lines_added', 'lines_removed',
-        )}
-        for r in feed_records
-    ]
+    # Feed: group by (slug, root_prompt_uuid) — all assistant responses that trace
+    # back to the same original user text prompt belong to one group.
+    group_map = defaultdict(list)
+    for rec in records:
+        key = (rec['slug'], rec['root_prompt_uuid'] or rec['uuid'])
+        group_map[key].append(rec)
+
+    feed_groups = []
+    for (slug, _puuid), msgs in group_map.items():
+        msgs_sorted = sorted(msgs, key=lambda r: r['timestamp'])
+        first = msgs_sorted[0]
+        # Use the first non-empty user_prompt / permission_mode in the group
+        prompt_rec = next((m for m in msgs_sorted if m['user_prompt']), first)
+        tools = ', '.join(dict.fromkeys(
+            t for m in msgs_sorted for t in (m['tools'].split(', ') if m['tools'] else [])
+        ))
+        total_in  = sum(m['input_tokens']           for m in msgs_sorted)
+        total_out = sum(m['output_tokens']           for m in msgs_sorted)
+        total_cw  = sum(m['cache_creation_tokens']   for m in msgs_sorted)
+        total_cr  = sum(m['cache_read_tokens']       for m in msgs_sorted)
+        feed_groups.append({
+            'id':                          first['uuid'],
+            'slug':                        slug,
+            'timestamp':                   first['timestamp'],
+            'model':                       first['model'],
+            'user_prompt':                 prompt_rec['user_prompt'],
+            'permission_mode':             prompt_rec['permission_mode'],
+            'tools':                       tools,
+            'total_input_tokens':          total_in,
+            'total_output_tokens':         total_out,
+            'total_cache_creation_tokens': total_cw,
+            'total_cache_read_tokens':     total_cr,
+            'total_tokens':                total_in + total_out + total_cw + total_cr,
+            'total_lines_added':           sum(m['lines_added']   for m in msgs_sorted),
+            'total_lines_removed':         sum(m['lines_removed'] for m in msgs_sorted),
+            'message_count':               len(msgs_sorted),
+            'messages': [{k: m[k] for k in (
+                'uuid', 'timestamp', 'model',
+                'input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens',
+                'total_tokens', 'content_preview', 'tools', 'lines_added', 'lines_removed',
+            )} for m in msgs_sorted],
+        })
+
+    feed_groups.sort(key=lambda g: g['timestamp'], reverse=True)
 
     # Per-project output
     by_project_out = {
@@ -345,6 +401,7 @@ def compute_data(claude_dir, from_str=None, to_str=None):
             'projects':                    sorted(proj_summ.keys()),
         },
         **{GRAN_KEYS[g]: buckets_to_series(overall[g]) for g in GRANULARITIES},
-        'by_project':            by_project_out,
-        'high_utilization_feed': feed_out,
+        'by_project':  by_project_out,
+        'feed_total':  len(feed_groups),
+        'feed_groups': feed_groups,
     }

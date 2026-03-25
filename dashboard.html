@@ -85,6 +85,29 @@ tbody td{padding:8px 12px;white-space:nowrap}
 .hdiv{width:1px;height:20px;background:var(--border);align-self:center;flex-shrink:0}
 .projlink{cursor:pointer;text-underline-offset:2px;text-decoration:underline;text-decoration-style:dotted}
 .projlink:hover{color:var(--blue)}
+
+/* ---- Toast notification ---- */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--amber);color:var(--amber);padding:10px 16px;border-radius:8px;font-size:13px;z-index:9999;animation:fadeout 4s forwards;pointer-events:none}
+@keyframes fadeout{0%,70%{opacity:1}100%{opacity:0;visibility:hidden}}
+
+/* ---- Selection panel ---- */
+#sel-panel{padding:12px 16px;border-top:1px solid var(--border);display:none;align-items:center;gap:16px;flex-wrap:wrap}
+.sel-stat{display:flex;flex-direction:column;gap:2px}
+.sel-stat-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sel-stat-val{font-weight:600}
+
+/* ---- Feed collapse ---- */
+.expand-toggle{cursor:pointer;font-size:10px;margin-right:4px;color:var(--muted);user-select:none;display:inline-block;width:10px;text-align:center}
+.expand-toggle:hover{color:var(--text)}
+.child-badge{font-size:10px;padding:1px 5px;border-radius:10px;background:rgba(74,158,255,.15);color:var(--blue);margin-left:4px}
+.child-row td{background:rgba(255,255,255,.015)}
+.child-row td:first-child{padding-left:28px;border-left:2px solid rgba(74,158,255,.2)}
+
+/* ---- Feed footer ---- */
+.feed-footer{padding:10px 16px;display:flex;align-items:center;gap:12px;border-top:1px solid var(--border)}
+
+/* ---- Chart interaction ---- */
+#ch,#ch2{cursor:crosshair}
 </style>
 </head>
 <body>
@@ -122,15 +145,23 @@ tbody td{padding:8px 12px;white-space:nowrap}
     <div class="card" title="Tokens written into the prompt cache this session. Charged at a higher rate than regular input, but future reads of the same content are much cheaper."><div class="cl">Cache Write</div><div class="cv amber" id="sw">—</div></div>
     <div class="card" title="Tokens served from the prompt cache — previously cached context that Claude reused instead of re-reading. Much cheaper than regular input tokens."><div class="cl">Cache Read</div><div class="cv emerald" id="sr">—</div></div>
     <div class="card" title="Tokens in Claude's response — the text, code, and tool calls Claude generated."><div class="cl">Output Tokens</div><div class="cv purple" id="so">—</div></div>
+    <div class="card" title="Your plan's 5-hour usage window limit in weighted tokens. Edit to calibrate — observe a session near 100% usage and set this to the weighted total shown in the selection panel."><div class="cl">5h Limit</div><div class="cv"><input id="limit-input" type="number" step="100000" min="0" style="width:110px;background:transparent;border:none;border-bottom:1px solid var(--border);color:inherit;font-size:inherit;font-weight:700;text-align:center;outline:none;letter-spacing:-.02em" value="3500000"></div></div>
   </div>
 
   <div class="sec">
     <div class="sh">
       <span class="st">Token Usage Over Time</span>
+      <label class="wt-lbl" title="Fill all time periods with no activity as zero values">
+        <input type="checkbox" id="fpchk" checked> Show empty periods
+      </label>
     </div>
-    <div class="cw">
+    <div class="cw" id="ch-wrap">
       <canvas id="ch"></canvas>
       <div id="nodata">No data for this view</div>
+    </div>
+    <div id="sel-panel">
+      <div id="sel-content" style="display:flex;gap:20px;flex-wrap:wrap;flex:1;font-size:13px"></div>
+      <button class="sec" id="sel-clear">&#10005; Clear selection</button>
     </div>
   </div>
 
@@ -139,9 +170,13 @@ tbody td{padding:8px 12px;white-space:nowrap}
       <span class="st">Tokens by Project</span>
       <span style="font-size:12px;color:var(--muted)">Total tokens per period — one bar per project</span>
     </div>
-    <div class="cw">
+    <div class="cw" id="ch2-wrap">
       <canvas id="ch2"></canvas>
       <div id="nodata2">No project data for this view</div>
+    </div>
+    <div id="sel-panel2" style="padding:12px 16px;border-top:1px solid var(--border);display:none;align-items:center;gap:16px;flex-wrap:wrap">
+      <div id="sel-content2" style="display:flex;gap:20px;flex-wrap:wrap;flex:1;font-size:13px"></div>
+      <button class="sec" id="sel-clear2">&#10005; Clear selection</button>
     </div>
   </div>
 
@@ -150,14 +185,17 @@ tbody td{padding:8px 12px;white-space:nowrap}
       <span class="st">Lines of Code Over Time</span>
       <span style="font-size:12px;color:var(--muted)">Approximate — counted from Edit (old/new string) and Write (content) tool inputs</span>
     </div>
-    <div class="cw">
+    <div class="cw" id="ch3-wrap">
       <canvas id="ch3"></canvas>
       <div id="nodata3">No edit/write activity for this view</div>
     </div>
   </div>
 
   <div class="sec">
-    <div class="sh"><span class="st">Recent Messages</span></div>
+    <div class="sh">
+      <span class="st">Recent Messages</span>
+      <button class="sec" id="ca-btn">Expand All</button>
+    </div>
     <div class="fw">
       <table>
         <thead><tr>
@@ -178,6 +216,10 @@ tbody td{padding:8px 12px;white-space:nowrap}
         </tr></thead>
         <tbody id="fb"><tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">Loading…</td></tr></tbody>
       </table>
+      <div class="feed-footer">
+        <span id="feed-count" style="color:var(--muted);font-size:12px"></span>
+        <button class="sec" id="feed-load-more" style="display:none">Load More</button>
+      </div>
     </div>
   </div>
 </main>
@@ -185,10 +227,21 @@ tbody td{padding:8px 12px;white-space:nowrap}
 <script>
 // ---- State ----
 let D = null, gran = 'hour', proj = '', sortBy = 'timestamp', sortDir = 'desc', chart = null, chart2 = null, chart3 = null, weighted = true;
+let fillPeriods = true;
+let selectedPeriods = new Set(), selectionAnchor = null, chartEventsAttached = false, chart2EventsAttached = false;
+let chartPeriodKeys = [];  // parallel UTC period keys for selectedPeriods matching
+let expandedGroups = new Set();
+let feedPage = 1;
+const FEED_PAGE_SIZE = 500;
+let dragStart = null, dragging = false;
 
 const PROJ_COLORS = ['#4a9eff','#f59e0b','#10b981','#a855f7','#ef4444','#06b6d4','#84cc16','#f97316','#ec4899','#6366f1'];
 // Weights each token type contributes toward Anthropic usage limits.
 const WEIGHTS = {input: 1.0, output: 5.0, cache_creation: 1.25, cache_read: 0.1};
+// 5-hour usage window limit in weighted tokens. Edit via the card UI to calibrate.
+// Tip: run a session to ~100% usage, note the weighted total in the selection panel, then set that here.
+let fiveHourLimit = 3_500_000;
+let weekLimit     = 0;  // weekly limit (0 = hidden)
 
 const GK = {
   '5min':'by_5min','15min':'by_15min','hour':'by_hour',
@@ -200,6 +253,13 @@ function fmt(n) {
   if (n==null) return '0';
   if (n>=1e9) return (n/1e9).toFixed(1)+'B';
   if (n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if (n>=1e3) return (n/1e3).toFixed(1)+'K';
+  return ''+n;
+}
+function fmtW(n) {
+  if (n==null) return '0';
+  if (n>=1e9) return (n/1e9).toFixed(2)+'B';
+  if (n>=1e6) return (n/1e6).toFixed(2)+'M';
   if (n>=1e3) return (n/1e3).toFixed(1)+'K';
   return ''+n;
 }
@@ -228,6 +288,24 @@ function wtotal(m) {
     m.cache_read_tokens       * WEIGHTS.cache_read
   );
 }
+function wtotalGroup(g) {
+  if(!weighted) return g.total_tokens;
+  return Math.round(
+    g.total_input_tokens            * WEIGHTS.input +
+    g.total_output_tokens           * WEIGHTS.output +
+    g.total_cache_creation_tokens   * WEIGHTS.cache_creation +
+    g.total_cache_read_tokens       * WEIGHTS.cache_read
+  );
+}
+function localLabel(key, g) {
+  if(g==='day'||g==='week'||g==='month') return key;
+  const iso = g==='hour' ? key+':00:00Z' : key+':00Z';
+  const d = new Date(iso);
+  if(isNaN(d)) return key;
+  if(g==='hour')
+    return d.toLocaleString(undefined,{month:'numeric',day:'numeric',hour:'numeric',hour12:false});
+  return d.toLocaleString(undefined,{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',hour12:false});
+}
 function summ() {
   if(proj && D.by_project[proj]) return D.by_project[proj].summary;
   return D.summary;
@@ -237,6 +315,199 @@ function series() {
   if(proj && D.by_project[proj]) return D.by_project[proj][k]||[];
   return D[k]||[];
 }
+
+// ---- Toast ----
+function showToast(msg) {
+  const t=document.createElement('div');
+  t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),4000);
+}
+
+// ---- Densify series (fill empty periods) ----
+function densifySeries(s, g) {
+  if(!s.length) return s;
+  const zero=()=>({input:0,output:0,cache_creation:0,cache_read:0,messages:0,lines_added:0,lines_removed:0});
+  const map={};
+  s.forEach(d=>{map[d.period]=d;});
+
+  // Parse a period key back to a JS Date (UTC midnight or start-of-period)
+  function parseKey(k) {
+    if(g==='5min'||g==='15min') return new Date(k+':00Z');
+    if(g==='hour')  return new Date(k+':00:00Z');
+    if(g==='day')   return new Date(k+'T00:00:00Z');
+    if(g==='week'){
+      // YYYY-Www → Monday of that ISO week
+      const [y,wStr]=k.split('-W');
+      const w=parseInt(wStr,10);
+      // Jan 4 is always in week 1; compute day-of-week of Jan 4
+      const jan4=new Date(Date.UTC(+y,0,4));
+      const dayOfWeek=(jan4.getUTCDay()+6)%7; // Mon=0
+      const week1Mon=new Date(jan4.getTime()-dayOfWeek*86400000);
+      return new Date(week1Mon.getTime()+(w-1)*7*86400000);
+    }
+    if(g==='month') return new Date(k+'-01T00:00:00Z');
+    return new Date(k);
+  }
+
+  // Format a Date to the period key format for this granularity
+  function fmtKey(d) {
+    const pad=n=>String(n).padStart(2,'0');
+    if(g==='5min'||g==='15min'){
+      const m=(g==='5min'?Math.floor(d.getUTCMinutes()/5)*5:Math.floor(d.getUTCMinutes()/15)*15);
+      return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+'T'+pad(d.getUTCHours())+':'+pad(m);
+    }
+    if(g==='hour') return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+'T'+pad(d.getUTCHours());
+    if(g==='day')  return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate());
+    if(g==='week'){
+      // ISO week number
+      const tmp=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()));
+      const dayNum=(tmp.getUTCDay()+6)%7;
+      tmp.setUTCDate(tmp.getUTCDate()-dayNum+3);
+      const firstThursday=new Date(Date.UTC(tmp.getUTCFullYear(),0,4));
+      const wk=1+Math.round(((tmp-firstThursday)/86400000-(3-((firstThursday.getUTCDay()+6)%7)))/7);
+      return tmp.getUTCFullYear()+'-W'+String(wk).padStart(2,'0');
+    }
+    if(g==='month') return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1);
+    return d.toISOString();
+  }
+
+  // Step size in ms (for non-month granularities)
+  const steps={'5min':5*60000,'15min':15*60000,'hour':3600000,'day':86400000,'week':7*86400000};
+
+  const first=parseKey(s[0].period), last=parseKey(s[s.length-1].period);
+  const result=[];
+
+  if(g==='month') {
+    let y=first.getUTCFullYear(), m=first.getUTCMonth();
+    const ey=last.getUTCFullYear(), em=last.getUTCMonth();
+    while(y<ey||(y===ey&&m<=em)) {
+      const pad=n=>String(n).padStart(2,'0');
+      const k=y+'-'+pad(m+1);
+      result.push(map[k]||{period:k,...zero()});
+      m++; if(m>11){m=0;y++;}
+    }
+  } else {
+    const step=steps[g]||3600000;
+    // Estimate count before generating to guard against excessive periods
+    const estimatedCount=Math.ceil((last-first)/step)+1;
+    if(estimatedCount>5000) {
+      showToast('Too many periods to fill ('+estimatedCount+') — switch to a coarser granularity');
+      return s;
+    }
+    let cur=first.getTime();
+    const end=last.getTime();
+    while(cur<=end) {
+      const k=fmtKey(new Date(cur));
+      result.push(map[k]||{period:k,...zero()});
+      cur+=step;
+    }
+  }
+  return result;
+}
+
+// ---- Chart helpers for scroll/sizing ----
+function applyChartScroll(wrapId, count) {
+  const wrap=document.getElementById(wrapId);
+  if(!wrap) return;
+  if(fillPeriods && count>100) {
+    wrap.style.overflowX='auto';
+    const cv=wrap.querySelector('canvas');
+    if(cv) cv.style.minWidth=Math.max(wrap.clientWidth,count*12)+'px';
+  } else {
+    wrap.style.overflowX='';
+    const cv=wrap.querySelector('canvas');
+    if(cv) cv.style.minWidth='';
+  }
+}
+
+// ---- Selection background plugin (registered per-chart instance) ----
+const selectionBgPlugin = {
+  id: 'selectionBg',
+  beforeDraw(c) {
+    if(!selectedPeriods.size||!chartPeriodKeys.length) return;
+    const meta=c.getDatasetMeta(0);
+    if(!meta||!meta.data.length) return;
+    const ctx=c.ctx;
+    ctx.save();
+    ctx.fillStyle='rgba(74,158,255,0.10)';
+    chartPeriodKeys.forEach((key,i)=>{
+      if(!selectedPeriods.has(key)) return;
+      const bar=meta.data[i];
+      if(!bar) return;
+      ctx.fillRect(bar.x-bar.width/2,c.chartArea.top,bar.width,c.chartArea.height);
+    });
+    ctx.restore();
+  }
+};
+
+// ---- Selection helpers ----
+function clearSelection() {
+  selectedPeriods.clear(); selectionAnchor=null;
+  updateChartHighlight();
+  renderSelectionPanel();
+  renderSelectionPanel2();
+}
+
+function updateChartHighlight() {
+  // chart1: 4 token-type bar datasets
+  if(chart) {
+    const BASE=['#10b981','#f59e0b','#4a9eff','#a855f7'];
+    if(!selectedPeriods.size) {
+      BASE.forEach((c,i)=>{chart.data.datasets[i].backgroundColor=c;});
+    } else {
+      BASE.forEach((c,i)=>{
+        chart.data.datasets[i].backgroundColor=chartPeriodKeys.map(k=>selectedPeriods.has(k)?c:c+'44');
+      });
+    }
+    chart.update('none');
+  }
+  // chart2: one dataset per project
+  if(chart2) {
+    const dsCount=chart2.data.datasets.length;
+    if(!selectedPeriods.size) {
+      for(let i=0;i<dsCount;i++)
+        chart2.data.datasets[i].backgroundColor=PROJ_COLORS[i%PROJ_COLORS.length];
+    } else {
+      for(let i=0;i<dsCount;i++) {
+        const c=PROJ_COLORS[i%PROJ_COLORS.length];
+        chart2.data.datasets[i].backgroundColor=chartPeriodKeys.map(k=>selectedPeriods.has(k)?c:c+'44');
+      }
+    }
+    chart2.update('none');
+  }
+}
+
+function _buildSelHtml(panelId, contentId) {
+  const panel=document.getElementById(panelId);
+  if(!selectedPeriods.size){panel.style.display='none';return;}
+  panel.style.display='flex';
+  const s=series();
+  const sel=s.filter(d=>selectedPeriods.has(d.period));
+  const agg=sel.reduce((a,d)=>({
+    input:a.input+d.input, output:a.output+d.output,
+    cache_creation:a.cache_creation+d.cache_creation, cache_read:a.cache_read+d.cache_read,
+    messages:a.messages+d.messages
+  }),{input:0,output:0,cache_creation:0,cache_read:0,messages:0});
+  const wt=Math.round(agg.input*WEIGHTS.input+agg.output*WEIGHTS.output+
+    agg.cache_creation*WEIGHTS.cache_creation+agg.cache_read*WEIGHTS.cache_read);
+  let html='<div class="sel-stat"><span class="sel-stat-lbl">Selected</span><span class="sel-stat-val">'+selectedPeriods.size+' period'+(selectedPeriods.size>1?'s':'')+'</span></div>';
+  if(weighted) {
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Weighted Total</span><span class="sel-stat-val" title="'+wt.toLocaleString()+'">'+fmtW(wt)+'</span></div>';
+    if(fiveHourLimit>0) html+='<div class="sel-stat"><span class="sel-stat-lbl">% of 5h Limit</span><span class="sel-stat-val">'+(wt/fiveHourLimit*100).toFixed(1)+'%</span></div>';
+    if(weekLimit>0) html+='<div class="sel-stat"><span class="sel-stat-lbl">% of Weekly Limit</span><span class="sel-stat-val">'+(wt/weekLimit*100).toFixed(1)+'%</span></div>';
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Messages</span><span class="sel-stat-val">'+agg.messages+'</span></div>';
+  } else {
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Input</span><span class="sel-stat-val ic">'+fmt(agg.input)+'</span></div>';
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Cache Write</span><span class="sel-stat-val wc">'+fmt(agg.cache_creation)+'</span></div>';
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Cache Read</span><span class="sel-stat-val rc">'+fmt(agg.cache_read)+'</span></div>';
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Output</span><span class="sel-stat-val oc">'+fmt(agg.output)+'</span></div>';
+    html+='<div class="sel-stat"><span class="sel-stat-lbl">Messages</span><span class="sel-stat-val">'+agg.messages+'</span></div>';
+  }
+  document.getElementById(contentId).innerHTML=html;
+}
+function renderSelectionPanel()  { _buildSelHtml('sel-panel',  'sel-content');  }
+function renderSelectionPanel2() { _buildSelHtml('sel-panel2', 'sel-content2'); }
 
 // ---- Render cards ----
 function renderCards() {
@@ -259,19 +530,62 @@ function renderCards() {
   }
 }
 
+// ---- Drag-select helper (attaches to a canvas; sel/desel by period key index) ----
+function attachDragSelect(cv, getChart, onUpdate) {
+  let ds=null, dr=false;
+  cv.addEventListener('mousedown',e=>{
+    const c=getChart(); if(!c) return;
+    const els=c.getElementsAtEventForMode(e,'index',{intersect:false},false);
+    if(!els.length) return;
+    ds=els[0].index; dr=true;
+  });
+  cv.addEventListener('mousemove',e=>{
+    const c=getChart(); if(!c||!dr||ds===null) return;
+    const els=c.getElementsAtEventForMode(e,'index',{intersect:false},false);
+    if(!els.length) return;
+    const cur=els[0].index;
+    const lo=Math.min(ds,cur),hi=Math.max(ds,cur);
+    selectedPeriods.clear();
+    for(let i=lo;i<=hi;i++) selectedPeriods.add(chartPeriodKeys[i]);
+    onUpdate();
+  });
+  cv.addEventListener('mouseup',e=>{
+    const c=getChart(); if(!c) return;
+    if(dr && ds!==null) {
+      const els=c.getElementsAtEventForMode(e,'index',{intersect:false},false);
+      if(els.length && els[0].index===ds) {
+        const key=chartPeriodKeys[ds];
+        if(selectedPeriods.has(key)&&selectedPeriods.size===1) {
+          selectedPeriods.clear(); selectionAnchor=null;
+        } else {
+          selectedPeriods.clear(); selectedPeriods.add(key); selectionAnchor=key;
+        }
+        onUpdate();
+      }
+    }
+    dr=false; ds=null;
+  });
+  cv.addEventListener('mouseleave',()=>{dr=false; ds=null;});
+}
+
 // ---- Render chart ----
 function renderChart() {
-  const s=series();
+  const raw=series();
   const nd=document.getElementById('nodata');
   const cv=document.getElementById('ch');
-  if(!s.length){
-    if(chart){chart.destroy();chart=null;}
-    cv.style.display='none'; nd.style.display='flex'; return;
+  if(!raw.length){
+    if(chart){chart.destroy();chart=null;chartEventsAttached=false;}
+    cv.style.display='none'; nd.style.display='flex';
+    clearSelection(); return;
   }
   cv.style.display=''; nd.style.display='none';
 
+  const s=fillPeriods&&raw.length>1?densifySeries(raw,gran):raw;
+  applyChartScroll('ch-wrap',s.length);
+
   const W=WEIGHTS, yTitle=weighted?'Usage Weight':'Tokens';
-  const labels=s.map(d=>d.period);
+  chartPeriodKeys=s.map(d=>d.period);
+  const labels=chartPeriodKeys.map(k=>localLabel(k,gran));
   const rows=[
     s.map(d=>weighted?Math.round(d.cache_read*W.cache_read):d.cache_read),
     s.map(d=>weighted?Math.round(d.cache_creation*W.cache_creation):d.cache_creation),
@@ -283,25 +597,32 @@ function renderChart() {
   // Update in place to avoid re-running the draw animation on every poll
   if(chart){
     chart.data.labels=labels;
-    chart.data.datasets.forEach((ds,i)=>{ds.data=rows[i];});
+    for(let i=0;i<5;i++) chart.data.datasets[i].data=rows[i];
+    if(chart.data.datasets[5]) chart.data.datasets[5].data=labels.map(()=>fiveHourLimit);
     chart.options.scales.y.title.text=yTitle;
-    chart.update('none');
+    updateChartHighlight(); // re-applies per-bar colors (also calls chart.update('none'))
     return;
   }
 
+  const datasets=[
+    {type:'bar',label:'Cache Read',  data:rows[0],backgroundColor:'#10b981',stack:'t',yAxisID:'y'},
+    {type:'bar',label:'Cache Write', data:rows[1],backgroundColor:'#f59e0b',stack:'t',yAxisID:'y'},
+    {type:'bar',label:'Input',       data:rows[2],backgroundColor:'#4a9eff',stack:'t',yAxisID:'y'},
+    {type:'bar',label:'Output',      data:rows[3],backgroundColor:'#a855f7',stack:'t',yAxisID:'y'},
+    {type:'line',label:'Messages',   data:rows[4],
+     borderColor:'#94a3b8',backgroundColor:'transparent',
+     yAxisID:'y2',pointRadius:3,borderWidth:2,tension:.3,pointBackgroundColor:'#94a3b8'},
+  ];
+  if(weighted && fiveHourLimit>0) {
+    datasets.push({
+      type:'line',label:'5h Limit',data:labels.map(()=>fiveHourLimit),
+      borderColor:'rgba(239,68,68,0.6)',borderWidth:1.5,borderDash:[6,4],
+      backgroundColor:'transparent',pointRadius:0,yAxisID:'y',order:0
+    });
+  }
+
   chart=new Chart(cv.getContext('2d'),{
-    data:{
-      labels,
-      datasets:[
-        {type:'bar',label:'Cache Read',   data:rows[0],backgroundColor:'#10b981',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Cache Write',  data:rows[1],backgroundColor:'#f59e0b',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Input',        data:rows[2],backgroundColor:'#4a9eff',stack:'t',yAxisID:'y'},
-        {type:'bar',label:'Output',       data:rows[3],backgroundColor:'#a855f7',stack:'t',yAxisID:'y'},
-        {type:'line',label:'Messages',    data:rows[4],
-         borderColor:'#94a3b8',backgroundColor:'transparent',
-         yAxisID:'y2',pointRadius:3,borderWidth:2,tension:.3,pointBackgroundColor:'#94a3b8'}
-      ]
-    },
+    data:{labels,datasets},
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
@@ -320,8 +641,14 @@ function renderChart() {
           callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}
         }
       }
-    }
+    },
+    plugins:[selectionBgPlugin]
   });
+
+  if(!chartEventsAttached) {
+    chartEventsAttached=true;
+    attachDragSelect(cv, ()=>chart, ()=>{updateChartHighlight();renderSelectionPanel();renderSelectionPanel2();});
+  }
 }
 
 // ---- Render project chart ----
@@ -332,7 +659,7 @@ function renderProjectChart() {
   const projects=Object.keys(D.by_project||{});
 
   if(!projects.length){
-    if(chart2){chart2.destroy();chart2=null;}
+    if(chart2){chart2.destroy();chart2=null;chart2EventsAttached=false;}
     cv.style.display='none'; nd.style.display='flex'; return;
   }
   cv.style.display=''; nd.style.display='none';
@@ -340,7 +667,16 @@ function renderProjectChart() {
   // Collect all periods across all projects, sorted
   const periodSet=new Set();
   projects.forEach(p=>{(D.by_project[p][key]||[]).forEach(d=>periodSet.add(d.period));});
-  const labels=[...periodSet].sort();
+  let periodKeys=[...periodSet].sort();
+  if(fillPeriods && periodKeys.length>1) {
+    const sparse=periodKeys.map(p=>({period:p}));
+    const dense=densifySeries(sparse,gran);
+    periodKeys=dense.map(d=>d.period);
+  }
+  // chart2 shares chartPeriodKeys with chart1 — update it here too
+  chartPeriodKeys=periodKeys;
+  const labels=periodKeys.map(k=>localLabel(k,gran));
+  applyChartScroll('ch2-wrap',labels.length);
 
   const W=WEIGHTS, yTitle2=weighted?'Usage Weight':'Total Tokens';
   const datasets=projects.map((p,i)=>{
@@ -352,7 +688,7 @@ function renderProjectChart() {
     });
     return {
       type:'bar', label:p,
-      data:labels.map(l=>byPeriod[l]||0),
+      data:periodKeys.map(k=>byPeriod[k]||0),
       backgroundColor:PROJ_COLORS[i%PROJ_COLORS.length],
       stack:'s',
     };
@@ -360,10 +696,9 @@ function renderProjectChart() {
 
   if(chart2){
     chart2.data.labels=labels;
-    // Rebuild datasets (project list may change between polls)
     chart2.data.datasets=datasets;
     chart2.options.scales.y.title.text=yTitle2;
-    chart2.update('none');
+    updateChartHighlight();  // re-applies selection highlight (calls chart2.update('none'))
     return;
   }
 
@@ -385,24 +720,32 @@ function renderProjectChart() {
           callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}
         }
       }
-    }
+    },
+    plugins:[selectionBgPlugin]
   });
+
+  if(!chart2EventsAttached) {
+    chart2EventsAttached=true;
+    attachDragSelect(cv, ()=>chart2, ()=>{updateChartHighlight();renderSelectionPanel();renderSelectionPanel2();});
+  }
 }
 
 // ---- Render LOC chart ----
 function renderLocChart() {
-  const s=series();
+  const raw=series();
   const nd=document.getElementById('nodata3');
   const cv=document.getElementById('ch3');
-  const hasData=s.some(d=>d.lines_added||d.lines_removed);
+  const hasData=raw.some(d=>d.lines_added||d.lines_removed);
 
-  if(!s.length||!hasData){
+  if(!raw.length||!hasData){
     if(chart3){chart3.destroy();chart3=null;}
     cv.style.display='none'; nd.style.display='flex'; return;
   }
   cv.style.display=''; nd.style.display='none';
 
-  const labels=s.map(d=>d.period);
+  const s=fillPeriods&&raw.length>1?densifySeries(raw,gran):raw;
+  applyChartScroll('ch3-wrap',s.length);
+  const labels=s.map(d=>localLabel(d.period,gran));
   const added  =s.map(d=>d.lines_added||0);
   const removed=s.map(d=>d.lines_removed||0);
 
@@ -444,47 +787,98 @@ function renderLocChart() {
 
 // ---- Render feed ----
 function renderFeed() {
-  let feed=[...(D.high_utilization_feed||[])];
-  if(proj) feed=feed.filter(m=>m.slug===proj);
-  const tokenKey={input:'input_tokens',cache_write:'cache_creation_tokens',
-                  cache_read:'cache_read_tokens',output:'output_tokens',
-                  lines_added:'lines_added',lines_removed:'lines_removed'};
-  feed.sort((a,b)=>{
-    let d = sortBy==='timestamp'
-      ? new Date(b.timestamp)-new Date(a.timestamp)
-      : sortBy==='total'
-        ? wtotal(b)-wtotal(a)
-        : (b[tokenKey[sortBy]]||0)-(a[tokenKey[sortBy]]||0);
+  let groups=[...(D.feed_groups||[])];
+  if(proj) groups=groups.filter(g=>g.slug===proj);
+
+  // Sort groups
+  groups.sort((a,b)=>{
+    let d;
+    if(sortBy==='timestamp') d=new Date(b.timestamp)-new Date(a.timestamp);
+    else if(sortBy==='total') d=wtotalGroup(b)-wtotalGroup(a);
+    else if(sortBy==='input') d=b.total_input_tokens-a.total_input_tokens;
+    else if(sortBy==='cache_write') d=b.total_cache_creation_tokens-a.total_cache_creation_tokens;
+    else if(sortBy==='cache_read') d=b.total_cache_read_tokens-a.total_cache_read_tokens;
+    else if(sortBy==='output') d=b.total_output_tokens-a.total_output_tokens;
+    else if(sortBy==='lines_added') d=b.total_lines_added-a.total_lines_added;
+    else if(sortBy==='lines_removed') d=b.total_lines_removed-a.total_lines_removed;
+    else d=new Date(b.timestamp)-new Date(a.timestamp);
     return sortDir==='desc'?d:-d;
   });
+
   document.getElementById('th-total-lbl').textContent=weighted?'W-Total':'Total';
   const tb=document.getElementById('fb');
-  if(!feed.length){
+  const totalFiltered=groups.length;
+
+  const visible=groups.slice(0,feedPage*FEED_PAGE_SIZE);
+
+  const countEl=document.getElementById('feed-count');
+  const loadBtn=document.getElementById('feed-load-more');
+  if(countEl) countEl.textContent='Showing '+visible.length+' of '+totalFiltered+' groups';
+  if(loadBtn) loadBtn.style.display=visible.length<totalFiltered?'':'none';
+
+  if(!visible.length){
     tb.innerHTML='<tr><td colspan="14" style="text-align:center;padding:20px;color:#8892a4">No messages</td></tr>';
     return;
   }
-  tb.innerHTML=feed.map(m=>{
+
+  // Build a child row for an individual message record
+  function buildChildRow(m) {
     const ts=new Date(m.timestamp);
-    const modeCell=m.permission_mode
-      ? '<span class="modec">'+esc(m.permission_mode)+'</span>'
-      : '—';
-    return '<tr class="'+rowCls(m.total_tokens)+'">'
+    return '<tr class="'+rowCls(m.total_tokens)+' child-row">'
       +'<td title="'+esc(ts.toLocaleString())+'">'+esc(rel(m.timestamp))+'</td>'
-      +'<td><span class="projlink" data-p="'+esc(m.slug||'')+'">'+esc(m.slug||'—')+'</span></td>'
-      +'<td>'+modeCell+'</td>'
+      +'<td>—</td>'
+      +'<td>—</td>'
       +'<td class="mc" title="'+esc(m.model)+'">'+esc(m.model||'—')+'</td>'
       +'<td class="ic">'+fmt(m.input_tokens)+'</td>'
       +'<td class="wc">'+fmt(m.cache_creation_tokens)+'</td>'
       +'<td class="rc">'+fmt(m.cache_read_tokens)+'</td>'
       +'<td class="oc">'+fmt(m.output_tokens)+'</td>'
-      +'<td class="tc"><strong>'+fmt(wtotal(m))+'</strong></td>'
+      +'<td class="tc" title="'+wtotal(m).toLocaleString()+'"><strong>'+fmtW(wtotal(m))+'</strong></td>'
       +'<td style="color:#10b981">'+((m.lines_added||0)||'—')+'</td>'
       +'<td style="color:#ef4444">'+((m.lines_removed||0)||'—')+'</td>'
       +'<td class="toolsc" title="'+esc(m.tools)+'">'+esc(m.tools||'—')+'</td>'
-      +'<td class="upc" title="'+esc(m.user_prompt)+'">'+esc(m.user_prompt||'—')+'</td>'
+      +'<td class="upc">—</td>'
       +'<td class="pc" title="'+esc(m.content_preview)+'">'+esc(m.content_preview||'—')+'</td>'
       +'</tr>';
-  }).join('');
+  }
+
+  // Build the group (summary) header row
+  function buildGroupRow(g) {
+    const expanded=expandedGroups.has(g.id);
+    const hasChildren=g.message_count>1;
+    const ts=new Date(g.timestamp);
+    const modeCell=g.permission_mode?'<span class="modec">'+esc(g.permission_mode)+'</span>':'—';
+    const toggleIcon=hasChildren
+      ?'<span class="expand-toggle" data-gid="'+esc(g.id)+'">'+(expanded?'▼':'▶')+'</span>'
+      :'<span style="display:inline-block;width:14px"></span>';
+    const badgeHtml=hasChildren&&!expanded?'<span class="child-badge">+'+g.message_count+'</span>':'';
+    const gWt=wtotalGroup(g);
+    const preview=g.messages&&g.messages.length?g.messages[g.messages.length-1].content_preview||'':'';
+
+    let html='<tr class="'+rowCls(g.total_tokens)+'">'
+      +'<td title="'+esc(ts.toLocaleString())+'">'+toggleIcon+esc(rel(g.timestamp))+badgeHtml+'</td>'
+      +'<td><span class="projlink" data-p="'+esc(g.slug||'')+'">'+esc(g.slug||'—')+'</span></td>'
+      +'<td>'+modeCell+'</td>'
+      +'<td class="mc" title="'+esc(g.model)+'">'+esc(g.model||'—')+'</td>'
+      +'<td class="ic">'+fmt(g.total_input_tokens)+'</td>'
+      +'<td class="wc">'+fmt(g.total_cache_creation_tokens)+'</td>'
+      +'<td class="rc">'+fmt(g.total_cache_read_tokens)+'</td>'
+      +'<td class="oc">'+fmt(g.total_output_tokens)+'</td>'
+      +'<td class="tc" title="'+gWt.toLocaleString()+'"><strong>'+fmtW(gWt)+'</strong></td>'
+      +'<td style="color:#10b981">'+((g.total_lines_added||0)||'—')+'</td>'
+      +'<td style="color:#ef4444">'+((g.total_lines_removed||0)||'—')+'</td>'
+      +'<td class="toolsc" title="'+esc(g.tools)+'">'+esc(g.tools||'—')+'</td>'
+      +'<td class="upc" title="'+esc(g.user_prompt)+'">'+esc(g.user_prompt||'—')+'</td>'
+      +'<td class="pc" title="'+esc(preview)+'">'+esc(preview)+'</td>'
+      +'</tr>';
+
+    if(expanded && g.messages) {
+      html+=g.messages.map(buildChildRow).join('');
+    }
+    return html;
+  }
+
+  tb.innerHTML=visible.map(buildGroupRow).join('');
 }
 
 function updateSortUI() {
@@ -536,20 +930,24 @@ async function fetchData() {
 }
 
 // ---- Events ----
-document.getElementById('ab').addEventListener('click',fetchData);
+document.getElementById('ab').addEventListener('click',()=>{
+  feedPage=1; clearSelection(); expandedGroups.clear(); fetchData();
+});
 document.getElementById('cb').addEventListener('click',()=>{
   document.getElementById('fd').value='';
   document.getElementById('td').value='';
-  fetchData();
+  feedPage=1; clearSelection(); expandedGroups.clear(); fetchData();
 });
 document.getElementById('ps').addEventListener('change',e=>{
   proj=e.target.value;
+  feedPage=1; clearSelection(); expandedGroups.clear();
   if(D) renderAll();
 });
 document.getElementById('wchk').addEventListener('change',e=>{
   weighted=e.target.checked;
-  if(chart){chart.destroy();chart=null;}
-  if(chart2){chart2.destroy();chart2=null;}
+  if(chart){chart.destroy();chart=null;chartEventsAttached=false;}
+  if(chart2){chart2.destroy();chart2=null;chart2EventsAttached=false;}
+  clearSelection();
   if(D){renderCards();renderChart();renderProjectChart();renderFeed();}
 });
 document.getElementById('tabs').addEventListener('click',e=>{
@@ -558,20 +956,56 @@ document.getElementById('tabs').addEventListener('click',e=>{
   gran=t.dataset.g;
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');
+  clearSelection();
   if(D){renderChart();renderProjectChart();renderLocChart();}
 });
 document.getElementById('fb').addEventListener('click',e=>{
+  // Expand/collapse toggle
+  const tog=e.target.closest('.expand-toggle');
+  if(tog) {
+    const gid=tog.dataset.gid;
+    expandedGroups.has(gid)?expandedGroups.delete(gid):expandedGroups.add(gid);
+    if(D) renderFeed();
+    return;
+  }
+  // Project link filter
   const el=e.target.closest('.projlink');
   if(!el||!el.dataset.p) return;
   proj=el.dataset.p;
+  feedPage=1; expandedGroups.clear();
   document.getElementById('ps').value=proj;
   if(D) renderAll();
+});
+document.getElementById('ca-btn').addEventListener('click',()=>{
+  if(expandedGroups.size>0) {
+    expandedGroups.clear();
+    document.getElementById('ca-btn').textContent='Expand All';
+  } else {
+    // Expand all visible groups that have children
+    const visible=(D.feed_groups||[]).filter(g=>!proj||g.slug===proj).slice(0,feedPage*FEED_PAGE_SIZE);
+    visible.forEach(g=>{ if(g.message_count>1) expandedGroups.add(g.id); });
+    document.getElementById('ca-btn').textContent='Collapse All';
+  }
+  if(D) renderFeed();
+});
+document.getElementById('sel-clear').addEventListener('click',clearSelection);
+document.getElementById('sel-clear2').addEventListener('click',clearSelection);
+document.getElementById('feed-load-more').addEventListener('click',()=>{feedPage++;if(D)renderFeed();});
+document.getElementById('limit-input').addEventListener('change',e=>{
+  fiveHourLimit=Number(e.target.value)||0;
+  if(chart){chart.destroy();chart=null;chartEventsAttached=false;}
+  if(D){renderChart();renderSelectionPanel();renderSelectionPanel2();}
+});
+document.getElementById('fpchk').addEventListener('change',e=>{
+  fillPeriods=e.target.checked;
+  if(D){renderChart();renderProjectChart();renderLocChart();}
 });
 document.querySelector('thead').addEventListener('click',e=>{
   const th=e.target.closest('th.sort');
   if(!th) return;
   if(sortBy===th.dataset.s) sortDir=sortDir==='desc'?'asc':'desc';
   else{sortBy=th.dataset.s;sortDir='desc';}
+  feedPage=1; expandedGroups.clear();
   updateSortUI();
   if(D) renderFeed();
 });
